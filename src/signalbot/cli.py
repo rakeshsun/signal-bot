@@ -115,6 +115,8 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="watch live candles for all enabled watches and send alerts")
     r.add_argument("--dry-run", action="store_true", help="print alerts instead of sending them")
+    r.add_argument("--dashboard", type=Path, default=None,
+                   help="HTML status page to keep updated (default: logs/dashboard.html next to config.toml)")
     c = sub.add_parser("check", help="load history and print each watch's current checklist")
     c.add_argument("watch", nargs="*", help="watch name(s); default: all enabled")
     b = sub.add_parser("backtest", help="replay one watch's strategy on past candles")
@@ -146,7 +148,8 @@ def main() -> None:
         return cmd_strategies()
     s = load(Path(a.config))
     if a.cmd == "run":
-        asyncio.run(run_live(s, a.dry_run))
+        dash = a.dashboard or Path(a.config).resolve().parent / "logs" / "dashboard.html"
+        asyncio.run(run_live(s, a.dry_run, dash))
     elif a.cmd == "check":
         asyncio.run(cmd_check(s, a.watch))
     elif a.cmd == "backtest":

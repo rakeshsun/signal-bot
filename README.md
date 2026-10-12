@@ -142,9 +142,18 @@ What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`
 | `./scripts/service.sh status` | is it running? |
 | `./scripts/service.sh logs` | follow the live log (Ctrl+C to exit) |
 | `./scripts/service.sh errors` | last startup errors / crashes |
+| `./scripts/service.sh dashboard` | open the status page in your browser |
 | `./scripts/service.sh restart` | after editing `config.toml` or pulling new code |
 | `./scripts/service.sh stop` / `start` | stop / start it |
 | `./scripts/service.sh uninstall` | remove the background service |
+
+### Dashboard
+
+While the bot runs it rewrites `logs/dashboard.html` every minute: one card per watch with the
+live 8-check table, the open trade (entry, stop, target, current P/L per contract), the recent
+trades with win rate, the last 25 alerts, and upcoming news days. Open it with
+`./scripts/service.sh dashboard` (or double-click the file); it refreshes itself every minute.
+If its "updated" time is old, the bot has stopped.
 
 ### Day to day
 
@@ -152,6 +161,11 @@ What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`
   today's checklist; signals arrive when they fire (gold window 7:20–9:30 CT).
 - **No 7:15 message?** Something is wrong: run `./scripts/service.sh status` and
   `./scripts/service.sh logs`. The bot also alerts you if candles stop arriving for 45 minutes.
+- **Alerts are never lost or repeated.** One that fails to send (Wi-Fi blip) is retried the
+  next minute; a restart right after a signal still delivers it; exits are always reported, even
+  after a data gap. If the data stream goes quiet while the market is open, the bot reconnects
+  by itself, and only messages you if that doesn't help. Futures contract rolls are followed
+  automatically. If the bot can't start (e.g. expired tastytrade token) you get one message a day.
 - **Mac must be awake.** With the lid closed on battery it sleeps and no alerts go out. Keep
   it plugged in, or open, during your trading window.
 - **Changed `config.toml` or updated the code** (`git pull`): `./scripts/service.sh restart`.

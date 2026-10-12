@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run signal-bot in the background on macOS (launchd): starts at login, restarts if it stops.
 #   ./scripts/service.sh install   # write the launchd file and start
-#   ./scripts/service.sh start|stop|restart|status|logs|errors|uninstall
+#   ./scripts/service.sh start|stop|restart|status|logs|errors|dashboard|uninstall
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
@@ -47,6 +47,7 @@ case "${1:-status}" in
                launchctl print "$DOMAIN/$LABEL" | grep -E "state =|pid =|last exit code" ; else echo "not running"; fi ;;
   logs)      tail -n 50 -f "$LOG" ;;
   errors)    tail -n 50 "$ERR" 2>/dev/null || echo "no errors logged" ;;
+  dashboard) open "$REPO/logs/dashboard.html" ;;
   uninstall) launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true; rm -f "$PLIST"; echo "removed" ;;
-  *) echo "usage: $0 install|start|stop|restart|status|logs|errors|uninstall"; exit 1 ;;
+  *) echo "usage: $0 install|start|stop|restart|status|logs|errors|dashboard|uninstall"; exit 1 ;;
 esac

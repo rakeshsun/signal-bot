@@ -7,11 +7,12 @@ import logging
 import platform
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 
 from .net import urlopen
-from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
@@ -30,20 +31,24 @@ class Notifier:
         self.cfg = cfg
         self.dry_run = dry_run
 
-    def send(self, title: str, body: str, urgent: bool = False) -> None:
+    def send(self, title: str, body: str, urgent: bool = False) -> bool:
+        """Deliver to every configured channel. True if at least one phone channel (or none is
+        configured) succeeded, so callers can retry later instead of losing the alert."""
         if sys.stdout.isatty():
             print(f"\n=== {title} ===\n{body}\n", flush=True)
         log.info("ALERT %s | %s", title, body.replace("\n", " / "))
         if self.dry_run:
-            return
+            return True
+        results: list[bool] = []
         if self.cfg.ntfy_topic:
-            self._ntfy(title, body, urgent)
+            results.append(self._ntfy(title, body, urgent))
         if self.cfg.telegram_token and self.cfg.telegram_chat_id:
-            self._telegram(f"{title}\n{body}")
+            results.append(self._telegram(f"{title}\n{body}"))
         if self.cfg.macos_banner and platform.system() == "Darwin":
             self._macos(title, body)
+        return any(results) or not results
 
-    def _ntfy(self, title: str, body: str, urgent: bool) -> None:
+    def _ntfy(self, title: str, body: str, urgent: bool) -> bool:
         url = f"{self.cfg.ntfy_server.rstrip('/')}/{self.cfg.ntfy_topic}"
         req = urllib.request.Request(
             url,
@@ -55,21 +60,25 @@ class Notifier:
             },
             method="POST",
         )
-        self._post(req, "ntfy")
+        return self._post(req, "ntfy")
 
-    def _telegram(self, text: str) -> None:
+    def _telegram(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.cfg.telegram_token}/sendMessage"
         data = json.dumps({"chat_id": self.cfg.telegram_chat_id, "text": text}).encode()
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        self._post(req, "telegram")
+        return self._post(req, "telegram")
 
     @staticmethod
-    def _post(req: urllib.request.Request, name: str) -> None:
-        try:
-            with urlopen(req, timeout=15):
-                pass
-        except Exception as exc:
-            log.warning("%s notification failed: %s", name, exc)
+    def _post(req: urllib.request.Request, name: str, tries: int = 3) -> bool:
+        for attempt in range(1, tries + 1):
+            try:
+                with urlopen(req, timeout=10):
+                    return True
+            except Exception as exc:
+                log.warning("%s notification failed (try %d/%d): %s", name, attempt, tries, exc)
+                if attempt < tries:
+                    time.sleep(2 * attempt)
+        return False
 
     @staticmethod
     def _macos(title: str, body: str) -> None:
