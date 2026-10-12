@@ -50,10 +50,8 @@ tests/               unit tests + TradingView trade list for parity checks
 ### 1. Install
 ```bash
 git clone https://github.com/<you>/signal-bot.git && cd signal-bot
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp config.example.toml config.toml
-cp .env.example .env
+./scripts/setup_mac.sh        # venv, install, config.toml + .env from the examples, tests
+source .venv/bin/activate
 ```
 Python 3.11+ (`brew install python@3.12` if `python3 --version` is older).
 
