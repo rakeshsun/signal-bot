@@ -14,6 +14,8 @@ import urllib.request
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from .net import urlopen
+
 log = logging.getLogger(__name__)
 
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
@@ -55,7 +57,7 @@ def fetch_ff(timeout: float = 15.0) -> dict[date, str]:
     """This week's CPI / jobs dates from ForexFactory; empty on any error (never blocks trading)."""
     try:
         req = urllib.request.Request(FF_URL, headers={"User-Agent": "signal-bot/0.2"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urlopen(req, timeout=timeout) as r:
             return parse_ff(json.load(r))
     except Exception as exc:  # the feed is rate-limited and occasionally down
         log.warning("news calendar fetch failed: %s", exc)

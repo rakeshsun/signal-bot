@@ -8,6 +8,8 @@ import platform
 import subprocess
 import urllib.parse
 import urllib.request
+
+from .net import urlopen
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -61,7 +63,7 @@ class Notifier:
     @staticmethod
     def _post(req: urllib.request.Request, name: str) -> None:
         try:
-            with urllib.request.urlopen(req, timeout=15):
+            with urlopen(req, timeout=15):
                 pass
         except Exception as exc:
             log.warning("%s notification failed: %s", name, exc)

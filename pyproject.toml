@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Pluggable trading-strategy signal bot: live tastytrade candles in, phone alerts out"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["tastytrade>=13.2,<14"]
+dependencies = ["tastytrade>=13.2,<14", "certifi"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
