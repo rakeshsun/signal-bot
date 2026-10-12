@@ -123,29 +123,39 @@ script will give the same trades as the TradingView Strategy Tester.
 
 ## Run in the background (macOS)
 
-`~/Library/LaunchAgents/com.signalbot.plist` (adjust the paths):
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.signalbot</string>
-  <key>WorkingDirectory</key><string>/Users/YOU/signal-bot</string>
-  <key>ProgramArguments</key><array>
-    <string>/Users/YOU/signal-bot/.venv/bin/signalbot</string><string>run</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/signalbot.log</string>
-  <key>StandardErrorPath</key><string>/tmp/signalbot.log</string>
-</dict></plist>
-```
+Install once. After that the bot runs by itself; nothing to start each day.
+
 ```bash
-launchctl load ~/Library/LaunchAgents/com.signalbot.plist    # start
-tail -f /tmp/signalbot.log
-launchctl unload ~/Library/LaunchAgents/com.signalbot.plist  # stop
+./scripts/service.sh install
 ```
-Keep the Mac awake during your trading windows (Energy settings, or `caffeinate -s`).
-Restarts are safe: sent alerts are remembered in `~/.signalbot/sent.json`.
+
+What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`):
+- starts now and **at every login**; no terminal or VS Code needs to stay open;
+- **restarts itself** if it crashes or the connection drops;
+- keeps the Mac from idle-sleeping while it runs (`caffeinate -i`);
+- writes its log to `logs/signalbot.log`.
+
+| Command | What it does |
+|---|---|
+| `./scripts/service.sh status` | is it running? |
+| `./scripts/service.sh logs` | follow the live log (Ctrl+C to exit) |
+| `./scripts/service.sh restart` | after editing `config.toml` or pulling new code |
+| `./scripts/service.sh stop` / `start` | stop / start it |
+| `./scripts/service.sh uninstall` | remove the background service |
+
+### Day to day
+
+- **Nothing to run daily.** Each weekday at 7:15 CT you get a "Signal bot: running" message with
+  today's checklist; signals arrive when they fire (gold window 7:20–9:30 CT).
+- **No 7:15 message?** Something is wrong: run `./scripts/service.sh status` and
+  `./scripts/service.sh logs`. The bot also alerts you if candles stop arriving for 45 minutes.
+- **Mac must be awake.** With the lid closed on battery it sleeps and no alerts go out. Keep
+  it plugged in, or open, during your trading window.
+- **Changed `config.toml` or updated the code** (`git pull`): `./scripts/service.sh restart`.
+- **Log too big?** `: > logs/signalbot.log` empties it. Normal logging is a few lines per day;
+  run commands with `-v` for full debug output.
+- **Duplicate alerts?** Don't also run `signalbot run` in a terminal while the service is
+  running. Use `signalbot run --dry-run` for experiments, or stop the service first.
 
 ## Other details
 
