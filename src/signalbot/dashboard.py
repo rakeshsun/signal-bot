@@ -71,27 +71,35 @@ def _ladder(t, last_close: float) -> str:
 </div>"""
 
 
+def _live(lv):
+    """(price, bar) of the bar in progress, or (None, None) outside trading hours."""
+    f = lv.book.forming() if hasattr(lv.book, "forming") else None
+    return (f.close, f) if f else (None, None)
+
+
 def _position(lv, last) -> str:
     t = lv.res.open_trade
+    live_px, live_bar = _live(lv)
+    now_px = live_px if live_px is not None else last.close
     names = contract_names(lv.watch, lv.symbol)
     if not t:
         return f"""<div class="pos flat">
   <p class="pos-state">Flat</p>
   <p class="pos-sub">No open trade on {E(lv.symbol)}. Signals can fire between {_window(lv)}.</p>
-  <p class="price">{_px(last.close)}<span>last close, {_clock(last.time + lv.book.bar_ms)}</span></p>
+  <p class="price">{_px(now_px)}<span>{'live price' if live_px is not None else f'last close, {_clock(last.time + lv.book.bar_ms)} (market closed)'}</span></p>
 </div>"""
-    up = (last.close - (t.entry_price or t.signal_close)) * t.direction
+    up = (now_px - (t.entry_price or t.signal_close)) * t.direction
     side = "Long" if t.direction > 0 else "Short"
     money = "".join(f"<li><b>{E(n)}</b> {_usd(up * ppt)}</li>" for n, ppt in names.items())
     return f"""<div class="pos {'long' if t.direction > 0 else 'short'}">
   <div class="pos-main">
     <p class="pos-state">{side} {E(lv.symbol)}</p>
     <p class="pos-sub">Signal {_day(t.signal_time).lower() if _day(t.signal_time) == 'Today' else _day(t.signal_time)} at {_clock(t.signal_time + lv.book.bar_ms)}, entry {_px(t.entry_price or t.signal_close)}</p>
-    <p class="pnl {'up' if up >= 0 else 'down'}">{up:+.2f}<span>points open</span></p>
+    <p class="pnl {'up' if up >= 0 else 'down'}">{up:+.2f}<span>points open, {'live' if live_px is not None else 'at last close'} {_px(now_px)}</span></p>
     <ul class="money">{money}</ul>
     <p class="pos-sub">Stop {t.risk:.2f} pts away, target {t.reward:.2f} pts away</p>
   </div>
-  {_ladder(t, last.close)}
+  {_ladder(t, now_px)}
 </div>"""
 
 
@@ -141,21 +149,46 @@ def _meter(label: str, oks: list[bool], names: list[str], side: str) -> str:
     return f'<div class="meter {side}{" ready" if n == len(oks) else ""}"><span class="m-l">{label}</span><span class="m-s">{segs}</span><span class="m-n">{n}/{len(oks)}</span></div>'
 
 
+def _bool_rows(rows):
+    return [r for r in rows if isinstance(r[1], bool) and isinstance(r[2], bool)]
+
+
+def _missing(rows, side: int) -> str:
+    miss = [str(r[0]) for r in rows if not r[side]]
+    return "all 8 pass" if not miss else ("needs " + ", ".join(miss[:3]) + (f" and {len(miss) - 3} more" if len(miss) > 3 else ""))
+
+
 def _checks(lv, nd) -> str:
-    rows = lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd))
-    bool_rows = [r for r in rows if isinstance(r[1], bool) and isinstance(r[2], bool)]
-    other = [r for r in rows if r not in bool_rows and not str(r[0]).startswith("Checks passed")]
+    closed = lv.book.closed_bars()
+    ctx = Context(lv.symbol, nd)
+    rows = lv.strategy.checklist(closed, ctx)
+    brows = _bool_rows(rows)
+    other = [r for r in rows if r not in brows and not str(r[0]).startswith("Checks passed")]
     out = []
-    if bool_rows:
-        names = [str(r[0]) for r in bool_rows]
-        out.append(_meter("Long", [r[1] for r in bool_rows], names, "long"))
-        out.append(_meter("Short", [r[2] for r in bool_rows], names, "short"))
+    _, live_bar = _live(lv)
+    if brows:
+        names = [str(r[0]) for r in brows]
+        if live_bar is not None:
+            prow = _bool_rows(lv.strategy.checklist(closed + [live_bar], ctx))
+            if prow:
+                closes = _clock(live_bar.time + lv.book.bar_ms)
+                out.append(f'<div class="live"><h4>Live: if the bar closed now <span>(it closes {closes})</span></h4>'
+                           + _meter("Long", [r[1] for r in prow], names, "long")
+                           + _meter("Short", [r[2] for r in prow], names, "short")
+                           + f'<p class="miss">Long {E(_missing(prow, 1))}.<br>Short {E(_missing(prow, 2))}.</p>'
+                           + '<p class="muted small">Changes with every tick. Only the closed bar counts for a signal.</p></div>')
+        out.append(f'<h4>Last closed bar <span>({_clock(closed[-1].time + lv.book.bar_ms)})</span></h4>')
+        out.append(_meter("Long", [r[1] for r in brows], names, "long"))
+        out.append(_meter("Short", [r[2] for r in brows], names, "short"))
         items = "".join(
             f'<li><span class="{"y" if r[1] else "n"}" aria-label="long {"yes" if r[1] else "no"}"></span>'
             f'<span class="{"y" if r[2] else "n"}" aria-label="short {"yes" if r[2] else "no"}"></span>{E(str(r[0]))}</li>'
-            for r in bool_rows
+            for r in brows
         )
-        out.append(f'<details open><summary>The {len(bool_rows)} checks</summary><ul class="cklist"><li class="hd"><span>L</span><span>S</span>check</li>{items}</ul></details>')
+        out.append(f'<details><summary>The {len(brows)} checks</summary><ul class="cklist"><li class="hd"><span>L</span><span>S</span>check</li>{items}</ul></details>')
+        wl, nl = lv.res.win_rate(1)
+        ws, ns = lv.res.win_rate(-1)
+        out.append(f'<p class="hist">When all 8 lined up recently: longs won <b>{wl}/{nl}</b>, shorts won <b>{ws}/{ns}</b>. Past results, not a forecast.</p>')
     for lab, lo, sh in other:
         v = lo if not isinstance(lo, bool) else ("yes" if lo else "no")
         out.append(f'<p class="kv"><span>{E(str(lab))}</span><b>{E(str(v))}</b></p>')
@@ -305,6 +338,10 @@ details summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .al p{margin:6px 0 0;font-size:13px;color:var(--soft)}
 .al.entry summary{color:var(--gold)}.al.warning summary{color:var(--down)}
 .muted{color:var(--soft)}
+h4{margin:12px 0 8px;font-size:13px;font-weight:600}h4 span{color:var(--soft);font-weight:400}
+.live{border:1px dashed var(--gold);border-radius:10px;padding:4px 12px 10px;margin-bottom:6px;background:color-mix(in srgb,var(--gold-2) 30%,transparent)}
+.miss{font-size:13px;margin:4px 0 2px}.small{font-size:12px;margin:2px 0 0}.hist{font-size:13px;color:var(--soft);margin:12px 0 0}
+
 .acts{display:grid;gap:12px;margin:0 0 18px}
 .act{display:grid;grid-template-columns:minmax(150px,auto) minmax(0,1fr);gap:6px 22px;align-items:center;border-radius:14px;padding:16px 22px;border:1px solid var(--line);background:var(--paper)}
 .act p{margin:0}.act-word{font:800 46px/1 "Archivo",sans-serif;font-stretch:125%;letter-spacing:.01em}
@@ -399,7 +436,7 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
     now = time.time()
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="60"><title>{E(title)}</title>
+<meta http-equiv="refresh" content="15"><title>{E(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..700&display=swap" rel="stylesheet">
 <style>{CSS}</style></head><body><div class="wrap">
@@ -408,7 +445,7 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 <span id="upd" data-t="{int(now)}">Updated {_clock(now)} CT</span><span>Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)}</span></p></header>
 {flash_html}{newsbar}{watches}
 <section class="panel"><h2>Alerts sent</h2>{_alerts(alerts)}</section>
-<p class="foot">Signals only, not trading advice. Trades are placed by you on Robinhood. This page reloads every minute while the bot runs.</p>
+<p class="foot">Signals only, not trading advice. Trades are placed by you on Robinhood. This page reloads every 15 seconds while the bot runs.</p>
 </div>
 <script>
 (function(){{var e=document.getElementById('upd');var t=+e.dataset.t;setInterval(function(){{var m=Math.floor((Date.now()/1000-t)/60);

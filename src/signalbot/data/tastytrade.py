@@ -104,6 +104,12 @@ class CandleBook:
             self._prune()
         return [self._bars[t] for t in sorted(self._bars) if t + self.bar_ms <= now_ms]
 
+    def forming(self, now_ms: int | None = None) -> Bar | None:
+        """The bar still in progress (its close is the latest traded price), if any."""
+        now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+        live = [t for t in self._bars if t <= now_ms < t + self.bar_ms]
+        return self._bars[max(live)] if live else None
+
     def __len__(self) -> int:
         return len(self._bars)
 

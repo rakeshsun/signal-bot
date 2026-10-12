@@ -196,6 +196,15 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open())
         log.info("dashboard: %s", dashboard_path)
 
+    async def dash_loop() -> None:  # live price + live checks on the page every 10 s
+        while dashboard_path is not None:
+            await asyncio.sleep(10)
+            try:
+                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open())
+            except Exception as exc:
+                log.debug("dashboard update failed: %s", exc)
+
+    dash_task = asyncio.create_task(dash_loop())
     try:
         while True:
             now = time.time()
@@ -297,5 +306,6 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
                 except Exception as exc:
                     log.warning("dashboard update failed: %s", exc)
     finally:
+        dash_task.cancel()
         for lv in lives:
             lv.task.cancel()
