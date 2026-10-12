@@ -125,6 +125,13 @@ def main() -> None:
     a = ap.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if not a.verbose:  # the tastytrade SDK logs every stream message at DEBUG; keep the log small
+        try:
+            import tastytrade  # noqa: F401  (its import sets its logger to DEBUG, so import first)
+        except ImportError:
+            pass
+        for name in ("tastytrade", "httpx", "httpx2", "httpcore", "websockets", "anyio"):
+            logging.getLogger(name).setLevel(logging.WARNING)
     if a.cmd == "strategies":
         return cmd_strategies()
     s = load(Path(a.config))
