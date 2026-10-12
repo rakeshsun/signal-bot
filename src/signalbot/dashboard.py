@@ -359,7 +359,7 @@ def _action(lv) -> str:
         return f"""<div class="act hold {'buy' if buy else 'sell'}">
   <p class="act-word">HOLD</p>
   <div class="act-body"><p class="act-head">{name}: {'long' if buy else 'short'} since {_clock(fired)}{'' if _day(fired) == 'Today' else ' ' + _day(fired)}</p>
-  <p>Keep your stop at {_px(t.stop)} and limit at {_px(t.target)} (or the same distances from your fill). No new entries until this trade closes.</p></div></div>"""
+  <p>If you took this trade: keep your stop at {_px(t.stop)} and limit at {_px(t.target)} (or the same distances from your fill). If you didn't, do nothing: don't enter late. No new signals until it closes.</p></div></div>"""
     last = res.trades[-1] if res and res.trades else None
     if last and last.exit_time and now_ms - (last.exit_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
         won = (last.points or 0) > 0
