@@ -305,10 +305,76 @@ details summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .al p{margin:6px 0 0;font-size:13px;color:var(--soft)}
 .al.entry summary{color:var(--gold)}.al.warning summary{color:var(--down)}
 .muted{color:var(--soft)}
+.acts{display:grid;gap:12px;margin:0 0 18px}
+.act{display:grid;grid-template-columns:minmax(150px,auto) minmax(0,1fr);gap:6px 22px;align-items:center;border-radius:14px;padding:16px 22px;border:1px solid var(--line);background:var(--paper)}
+.act p{margin:0}.act-word{font:800 46px/1 "Archivo",sans-serif;font-stretch:125%;letter-spacing:.01em}
+.act-head{font-weight:700;font-size:16px}.act-body p+p{margin-top:4px}.act-sm{opacity:.85;font-size:13px}
+.act.flash{color:#fff;border:0}.act.flash .act-word{font-size:64px}
+.act.flash.buy{background:var(--up);--fl:var(--up)}.act.flash.sell{background:var(--down);--fl:var(--down)}
+.act.hold .act-word{color:var(--gold)}.act.hold.buy{border-left:6px solid var(--up)}.act.hold.sell{border-left:6px solid var(--down)}
+.act.exit.win .act-word{color:var(--up)}.act.exit.loss .act-word{color:var(--down)}
+.act.none .act-word{color:var(--soft);font-size:32px;font-stretch:110%}
+@media (max-width:560px){.act{grid-template-columns:minmax(0,1fr)}.act.flash .act-word{font-size:48px}}
+@media (prefers-reduced-motion:no-preference){.act.flash{animation:flash 1s steps(2,jump-none) infinite alternate}
+@keyframes flash{from{background:var(--fl);box-shadow:0 0 0 0 transparent}to{background:color-mix(in srgb,var(--fl) 55%,var(--gold));box-shadow:0 0 0 6px color-mix(in srgb,var(--gold) 45%,transparent)}}}
+
 .foot{color:var(--soft);font-size:12px;margin-top:20px}
 @media (prefers-reduced-motion:no-preference){.lv-now::before{animation:pulse 2.4s ease-out infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--gold) 55%,transparent)}100%{box-shadow:0 0 0 9px transparent}}}
 """
+
+
+FRESH_MIN = 30  # a new entry signal flashes at the top of the page for this many minutes
+
+
+def _in_window(lv, now: datetime) -> bool | None:
+    p = lv.strategy.p
+    a = getattr(p, "session_start", getattr(p, "from_hhmm", None))
+    b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
+    if a is None or b is None:
+        return None
+    return now.weekday() < 5 and a <= now.hour * 100 + now.minute < b
+
+
+def _action(lv) -> str:
+    """One big word per watch: BUY / SELL (flashing, fresh signal), HOLD (trade open),
+    EXIT (trade just closed), NO ACTION (flat)."""
+    now_ms = time.time() * 1000
+    now = datetime.now(CHICAGO)
+    res = lv.res
+    name = f"{E(lv.watch.name.title())} {E(lv.symbol)}"
+    names = " or ".join(contract_names(lv.watch, lv.symbol)) or lv.symbol
+    t = res.open_trade if res else None
+    if t:
+        fired = t.signal_time + lv.book.bar_ms  # the alert goes out when the signal bar closes
+        buy = t.direction > 0
+        below, above = ("below", "above") if buy else ("above", "below")
+        mins = max(0, int((now_ms - fired) // 60_000))
+        if mins <= FRESH_MIN:
+            return f"""<div class="act flash {'buy' if buy else 'sell'}" role="alert">
+  <p class="act-word">{'BUY' if buy else 'SELL'}</p>
+  <div class="act-body"><p class="act-head">{name}, signal {_clock(fired)} ({'just now' if mins < 2 else f'{mins} min ago'})</p>
+  <p>On Robinhood: {'buy' if buy else 'sell'} {E(names)}, then place a stop <b>{t.risk:.2f} pts {below}</b> and a limit <b>{t.reward:.2f} pts {above}</b> your fill.</p>
+  <p class="act-sm">Signal close {_px(t.signal_close)}, stop {_px(t.stop)}, target {_px(t.target)}</p></div></div>"""
+        return f"""<div class="act hold {'buy' if buy else 'sell'}">
+  <p class="act-word">HOLD</p>
+  <div class="act-body"><p class="act-head">{name}: {'long' if buy else 'short'} since {_clock(fired)}{'' if _day(fired) == 'Today' else ' ' + _day(fired)}</p>
+  <p>Keep your stop at {_px(t.stop)} and limit at {_px(t.target)} (or the same distances from your fill). No new entries until this trade closes.</p></div></div>"""
+    last = res.trades[-1] if res and res.trades else None
+    if last and last.exit_time and now_ms - (last.exit_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
+        won = (last.points or 0) > 0
+        why = {"target": "target hit", "stop": "stop hit", "time": "end-of-day exit"}.get(last.exit_reason or "", "closed")
+        return f"""<div class="act exit {'win' if won else 'loss'}">
+  <p class="act-word">EXIT</p>
+  <div class="act-body"><p class="act-head">{name}: {why}, {last.points:+.2f} pts</p>
+  <p>{'Close the position now on Robinhood.' if last.exit_reason == 'time' else 'Your stop or limit should have filled. Check Robinhood and cancel the other order.'}</p></div></div>"""
+    inwin = _in_window(lv, now)
+    if inwin:
+        sub = f"Watching for a setup until {_window(lv).split(' and ')[1]}. Nothing to do yet."
+    else:
+        sub = f"Flat. Next chance between {_window(lv)} on the next trading day." if inwin is False else "Flat. Nothing to do."
+    return f"""<div class="act none"><p class="act-word">NO ACTION</p>
+  <div class="act-body"><p class="act-head">{name}</p><p>{sub}</p></div></div>"""
 
 
 def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool) -> str:
@@ -323,23 +389,31 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
     else:
         newsbar = ""
     watches = "".join(_watch(lv, nd) for lv in lives)
+    acts = [_action(lv) for lv in lives if lv.res]
+    flash_html = f'<div class="acts">{"".join(acts)}</div>'
+    title = "Signal Desk"
+    for lv, a in zip([lv for lv in lives if lv.res], acts):
+        if 'class="act flash' in a:
+            title = f"{'BUY' if lv.res.open_trade.direction > 0 else 'SELL'} {lv.symbol} · Signal Desk"
+            break
     now = time.time()
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="60"><title>Signal Desk</title>
+<meta http-equiv="refresh" content="60"><title>{E(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..700&display=swap" rel="stylesheet">
 <style>{CSS}</style></head><body><div class="wrap">
 <header class="top"><h1>Signal <em>Desk</em></h1>
 <p class="status"><span><span class="dot{' on' if mkt_open else ''}"></span>Market {'open' if mkt_open else 'closed'}</span>
 <span id="upd" data-t="{int(now)}">Updated {_clock(now)} CT</span><span>Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)}</span></p></header>
-{newsbar}{watches}
+{flash_html}{newsbar}{watches}
 <section class="panel"><h2>Alerts sent</h2>{_alerts(alerts)}</section>
 <p class="foot">Signals only, not trading advice. Trades are placed by you on Robinhood. This page reloads every minute while the bot runs.</p>
 </div>
 <script>
 (function(){{var e=document.getElementById('upd');var t=+e.dataset.t;setInterval(function(){{var m=Math.floor((Date.now()/1000-t)/60);
-if(m>=3){{e.textContent='Not updated for '+m+' min: the bot may have stopped';e.className='stale';}}}},20000);}})();
+if(m>=3){{e.textContent='Not updated for '+m+' min: the bot may have stopped';e.className='stale';}}}},20000);
+if(document.querySelector('.act.flash')){{var base=document.title,on=false;setInterval(function(){{on=!on;document.title=on?'🔔 '+base:base;}},900);}}}})();
 </script></body></html>"""
 
 

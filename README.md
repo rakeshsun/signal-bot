@@ -149,7 +149,16 @@ What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`
 
 ### Dashboard
 
-While the bot runs it rewrites `logs/dashboard.html` every minute: one card per watch with the
+At the top, one big word per watch tells you what to do now:
+
+| Shows | When | What to do |
+|---|---|---|
+| **BUY** / **SELL** (flashing, tab title blinks) | a new signal, for 30 minutes after it fires | enter on Robinhood, then set the stop and limit shown |
+| **HOLD** | a trade is open | nothing; keep your stop and limit in place |
+| **EXIT** | a trade closed in the last 30 minutes | check Robinhood; cancel the leftover order (or close, for a time exit) |
+| **NO ACTION** | flat | nothing; it says whether it's watching now or when the next window opens |
+
+Below that, while the bot runs it rewrites `logs/dashboard.html` every minute: one card per watch with the
 live 8-check table, the open trade (entry, stop, target, current P/L per contract), the recent
 trades with win rate, the last 25 alerts, and upcoming news days. Open it with
 `./scripts/service.sh dashboard` (or double-click the file); it refreshes itself every minute.
