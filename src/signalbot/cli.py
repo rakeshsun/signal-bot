@@ -41,8 +41,26 @@ async def cmd_check(s: Settings, names: list[str]) -> None:
         print(messages.status(w, symbol, res, strat.checklist(bars, ctx)), "\n")
 
 
-async def cmd_backtest(s: Settings, name: str, days: int, compare: Path | None, csv_in: Path | None) -> None:
-    w = s.watch(name)
+def _apply_overrides(w: Watch, sets: list[str]) -> Watch:
+    """--set key=value overrides for a backtest, typed like the strategy's Params field."""
+    import dataclasses
+
+    fields = strategies.get(w.strategy).Params.__dataclass_fields__
+    params = dict(w.params)
+    for item in sets:
+        k, _, v = item.partition("=")
+        k = k.strip()
+        if k not in fields:
+            raise SystemExit(f"--set {k}: not a param of {w.strategy}. Valid: {', '.join(fields)}")
+        typ = fields[k].type if isinstance(fields[k].type, str) else fields[k].type.__name__
+        params[k] = (v.lower() in ("1", "true", "yes", "on")) if "bool" in typ else int(v) if "int" in typ else float(v) if "float" in typ else v
+    return dataclasses.replace(w, params=params)
+
+
+async def cmd_backtest(s: Settings, name: str, days: int, compare: Path | None, csv_in: Path | None, sets: list[str] | None = None) -> None:
+    w = _apply_overrides(s.watch(name), sets or [])
+    if sets:
+        print("overrides:", ", ".join(sets))
     if csv_in:
         from .data import csvfile
 
@@ -75,6 +93,13 @@ def print_backtest(res: Result, w: Watch, symbol: str) -> None:
         pf = gw / gl if gl else float("inf")
         print(f"\nWin rate {wins}/{len(closed)} = {100 * wins / len(closed):.1f}% · profit factor {pf:.2f} · "
               f"net ${gw - gl:,.0f} per contract (point value {pv:g}) before commission/slippage")
+        by: dict[int, list] = {}
+        for t in closed:
+            by.setdefault(datetime.fromtimestamp(t.signal_time / 1000, tz=CHICAGO).hour, []).append(t)
+        print("\nBy signal hour (CT):  hour  trades  won   net pts")
+        for h in sorted(by):
+            ts = by[h]
+            print(f"                      {h:02d}:00 {len(ts):>6} {sum(1 for t in ts if t.won):>5} {sum(t.points for t in ts):>9.1f}")
 
 
 def compare_with_tradingview(res: Result, path: Path, bar_ms: int) -> None:
@@ -124,6 +149,8 @@ def main() -> None:
     b.add_argument("--days", type=int, default=120)
     b.add_argument("--csv", type=Path, help="bars from a CSV file instead of tastytrade")
     b.add_argument("--compare", type=Path, help="TradingView trade-list CSV to check parity against")
+    b.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="override a strategy param for this backtest, e.g. --set session_end=830 (repeatable)")
     sub.add_parser("strategies", help="list available strategies and their params")
     sub.add_parser("test-notify", help="send a test notification")
     a = ap.parse_args()
@@ -153,7 +180,7 @@ def main() -> None:
     elif a.cmd == "check":
         asyncio.run(cmd_check(s, a.watch))
     elif a.cmd == "backtest":
-        asyncio.run(cmd_backtest(s, a.watch, a.days, a.compare, a.csv))
+        asyncio.run(cmd_backtest(s, a.watch, a.days, a.compare, a.csv, a.set))
     elif a.cmd == "test-notify":
         Notifier(s.notify).send("Signal bot test", "If you can read this on your phone, alerts are set up.")
 

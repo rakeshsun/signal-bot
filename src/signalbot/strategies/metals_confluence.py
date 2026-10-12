@@ -121,7 +121,11 @@ class MetalsConfluence(Strategy):
             blocked = bool(news) and (
                 p.news_mode == "skip_session" or (p.news_mode == "skip_7_8" and 700 <= t < 800)
             )
-            if not (p.session_start <= t < p.session_end) or blocked:
+            if p.session_start <= p.session_end:
+                in_sess = p.session_start <= t < p.session_end
+            else:  # session crossing midnight, e.g. Asia 1800-0200
+                in_sess = t >= p.session_start or t < p.session_end
+            if not in_sess or blocked:
                 out.append(None)
                 continue
             go_long = p.do_long and all(ck[0])
