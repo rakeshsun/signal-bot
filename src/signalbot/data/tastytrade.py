@@ -26,7 +26,17 @@ class Instrument:
 
 def make_session() -> Session:
     """Reads TT_SECRET and TT_REFRESH from the environment (.env is loaded by config)."""
-    return Session()
+    import os
+
+    secret, refresh = os.environ.get("TT_SECRET", ""), os.environ.get("TT_REFRESH", "")
+    if not secret or secret.startswith("your-"):
+        raise SystemExit("TT_SECRET is not set in .env (the OAuth app's Client Secret)")
+    if not refresh.startswith("eyJ"):
+        raise SystemExit(
+            "TT_REFRESH in .env doesn't look like a refresh token. It is a long text starting with 'eyJ', "
+            "shown after Manage -> Create Grant on the tastytrade API page (not the Client ID or Client Secret)."
+        )
+    return Session(secret, refresh)
 
 
 async def resolve(session: Session, symbol: str, product: str = "") -> Instrument:
