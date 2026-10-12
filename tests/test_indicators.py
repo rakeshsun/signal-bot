@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from goldbot import indicators as ta
+from signalbot import indicators as ta
 
 
 def test_ema_seeds_with_sma_then_smooths():

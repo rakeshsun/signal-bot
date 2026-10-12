@@ -54,7 +54,7 @@ def parse_ff(events: list[dict]) -> dict[date, str]:
 def fetch_ff(timeout: float = 15.0) -> dict[date, str]:
     """This week's CPI / jobs dates from ForexFactory; empty on any error (never blocks trading)."""
     try:
-        req = urllib.request.Request(FF_URL, headers={"User-Agent": "gold-signal-bot/0.1"})
+        req = urllib.request.Request(FF_URL, headers={"User-Agent": "signal-bot/0.2"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return parse_ff(json.load(r))
     except Exception as exc:  # the feed is rate-limited and occasionally down

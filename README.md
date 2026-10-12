@@ -1,167 +1,168 @@
-# gold-signal-bot
+# signal-bot
 
-Live phone alerts for the **Metals Confluence** gold futures strategy, using free real-time
-market data from your **tastytrade** account instead of a paid TradingView plan.
+A small framework for **trading strategy alerts**: live candles from your **tastytrade** account
+come in, your strategies run on every closed bar, and you get a **phone notification** when one
+of them wants to trade, plus another when its stop, target or end-of-day exit is hit.
 
-Every 15 minutes the bot takes the latest closed gold futures candle (/GC, the same contract
-the TradingView backtest used), runs the same 8 checks as the TradingView script, and sends a push
-notification when all 8 line up during 7:20–9:30 am CT. It also tells you when the trade's stop or
-target is hit, warns you on CPI / jobs-report mornings, and pings you each weekday at 7:15 CT so
-you know it is running.
+Strategies are plug-ins. Each one is a single Python file containing only its entry rules; fills,
+stops, targets, one-trade-at-a-time, backtesting, alerts and the live feed are shared.
 
-It **only sends alerts**. It never places orders; you enter the trade yourself (bracket order on
-/MGC or /GC at Robinhood or tastytrade).
+It **only sends alerts**. It never places orders.
 
+Included strategies:
+
+| Strategy | Market | Rules | Status |
+|---|---|---|---|
+| `metals_confluence` | Gold futures (GC data → trade /MGC or /GC) | 15m, 8 confirming checks, 7:20–9:30 CT, 1.75 ATR stop, 1.5R target | main strategy (TradingView backtest PF ≈ 3) |
+| `es_range_breakout` | S&P futures (ES → /MES or /ES) | 15m breakout of the day's high, 9:30–11:00 CT, 1.25 ATR stop, 1R, flat by 3pm | thin edge, off by default |
+
+Example alert:
 ```
-BUY /GCZ6 — gold signal 8/8
+BUY /GCZ6 — gold 8/8
 Signal on the bar that closed 08:30 AM CT, close 4,213.6
-FROM YOUR FILL: stop 14.0 pts below, target 21.0 pts above
+FROM YOUR FILL: stop 14.00 pts below, target 21.00 pts above
 (levels from signal close: SL 4,199.6 · TP 4,234.6)
 /MGC: risk $140 · reward $210
-/GC:  risk $1,400 · reward $2,100
+/GC: risk $1,400 · reward $2,100
 ```
 
-## How it matches TradingView
+## Layout
 
-| Rule | TradingView script | Bot |
-|---|---|---|
-| Data | GCZ2026, 15 min, all hours | tastytrade /GC active month, 15 min, all hours |
-| Checks | EMA 20/50 stack, EMA 200 side, ADX ≥ 20 + DI, RSI zone + direction, MACD histogram, pullback to EMA 20 within 5 bars, trigger bar, volume > 20-bar avg | same, indicators re-implemented with Pine's formulas (`src/goldbot/indicators.py`) |
-| Session | 7:20–9:30 CT (bar open time) | same |
-| Entry | next bar open after the signal bar | same |
-| Stop / target | 1.75 × ATR(14) / 1.5 × stop, from the signal close | same |
-| Exit | stop or target only, one trade at a time | same, incl. TradingView's same-bar high/low rule |
-| News | skip 7:00–8:00 CT on CPI / jobs days | same list + this week's ForexFactory calendar |
-
-`tests/fixtures/tradingview_gcz2026_trades.csv` holds TradingView's own trade list
-(Jul 8 – Oct 12, 2026, 29 trades) so you can check the bot takes the same trades (step 6).
+```
+src/signalbot/
+  bars.py            Bar + time helpers
+  indicators.py      EMA, RMA, SMA, RSI, ATR, DMI/ADX, MACD, barssince - same formulas as Pine Script
+  engine.py          trade simulation (next-open fills, stop/target, TradingView same-bar rule, time exit)
+  strategies/
+    base.py          Strategy base class (what a plug-in implements)
+    metals_confluence.py
+    es_range_breakout.py
+    _template.py     copy this to start a new strategy
+  data/tastytrade.py live + historical candles (DXLink), futures or stocks
+  data/csvfile.py    bars from CSV (offline backtests)
+  runner.py          live loop: one stream per watch, alerts, heartbeat, stale-data watchdog
+  news.py notify.py messages.py config.py cli.py
+tests/               unit tests + TradingView trade list for parity checks
+```
 
 ## Setup (Mac, about 15 minutes)
 
 ### 1. Install
-
 ```bash
-git clone https://github.com/<you>/gold-signal-bot.git
-cd gold-signal-bot
+git clone https://github.com/<you>/signal-bot.git && cd signal-bot
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp config.example.toml config.toml
 cp .env.example .env
 ```
-
-Needs Python 3.11+ (`python3 --version`; `brew install python@3.12` if older).
+Python 3.11+ (`brew install python@3.12` if `python3 --version` is older).
 
 ### 2. tastytrade API access (one time)
-
-1. Log in at tastytrade → **Manage → My Profile → API** (the "OAuth Applications" page; you may
-   need to opt in to API access first).
-2. **Create an OAuth application**: tick the read / market-data scopes (no trading scope needed),
-   callback `http://localhost:8000`. Save the **client secret**.
-3. Open the app → **Manage → Create Grant** and save the **refresh token** (it doesn't expire).
-4. Put both in `.env`:
+1. tastytrade web → **Manage → My Profile → API** → opt in / open **OAuth Applications**.
+2. Create an application: read + market-data scopes (no trading scope needed), callback
+   `http://localhost:8000`. Save the **client secret**.
+3. Open it → **Manage → Create Grant** → save the **refresh token** (doesn't expire).
+4. In `.env`:
    ```
    TT_SECRET=...
    TT_REFRESH=...
    ```
-Your account needs real-time **futures** market data enabled (tastytrade asks you to sign the
-CME data agreement the first time you open a futures quote).
+Real-time futures quotes must be enabled on the account (tastytrade asks you to accept the CME
+data agreement the first time you open a futures quote).
 
 ### 3. Phone notifications (ntfy, free)
+1. Install **ntfy** on your phone. The developer is *Philipp Heckel*; not "Ntfy me".
+2. Subscribe to a hard-to-guess topic, e.g. `rakesh-signals-k39xq`.
+3. `config.toml` → `[notify] ntfy_topic = "rakesh-signals-k39xq"`.
+4. `signalbot test-notify`. The message should appear on your phone.
 
-1. Install **ntfy** on your phone (App Store / Play Store).
-2. Subscribe to a topic with a hard-to-guess name, e.g. `rakesh-gold-k39xq`.
-3. Put the same name in `config.toml` → `[notify] ntfy_topic = "rakesh-gold-k39xq"`.
-4. `goldbot test-notify` → the test message should appear on your phone.
-
-(Telegram also works: set `telegram_token` and `telegram_chat_id`.)
-
-### 4. Check the connection
-
+### 4. Check, verify, run
 ```bash
-goldbot check
+signalbot check                 # each enabled watch: contract, last bar, checklist
+signalbot backtest gold --days 110 --compare tests/fixtures/tradingview_gcz2026_trades.csv
+signalbot run --dry-run         # prints alerts instead of sending
+signalbot run                   # live
 ```
-Prints the contract it is watching, the last closed bar and today's 8-check table, the same table
-you see on the TradingView chart.
+The `--compare` file is TradingView's own trade list for the gold strategy on GCZ2026
+(Jul 8 – Oct 12, 2026, 29 trades). The backtest prints how many of those the bot also took, and
+any missing or extra trades. Expect nearly all. Small differences can come from where history
+starts (warm-up, whether a trade was already open) and data-vendor volume differences.
 
-### 5. Run it
+## Config: watches
 
-```bash
-goldbot run            # sends alerts
-goldbot run --dry-run  # prints alerts only
+Each `[[watch]]` runs one strategy on one instrument:
+
+```toml
+[[watch]]
+name = "gold"                 # used in alerts and CLI (signalbot backtest gold)
+strategy = "metals_confluence"
+symbol = "auto"               # "auto" + product = active futures month; "/GCZ6"; or a ticker "SPY"
+product = "GC"
+interval = "15m"
+enabled = true
+news_alert = true             # 7:00 CT heads-up on CPI / jobs days
+contracts = { "/MGC" = 10, "/GC" = 100 }   # $ per point lines in alerts
+point_value = 100             # $ per point of the data symbol (backtest totals)
+
+[watch.params]                # override any strategy param; omit = tested defaults
+rr = 1.5
 ```
+`signalbot strategies` lists strategies and their params.
 
-Leave it running during trading days. To keep it alive without a terminal window, see
-"Run in the background" below. Restarting is safe: alerts already sent are remembered in
-`~/.goldbot/sent.json` and are not sent twice.
+## Adding a strategy
 
-### 6. Parity check against TradingView (recommended once)
+1. `cp src/signalbot/strategies/_template.py src/signalbot/strategies/my_idea.py`
+2. Set `name`, `description`, the `Params` dataclass, and the rules in `signals()`. It returns
+   one item per bar: `None`, or `Signal(direction, stop, target)`. Bar *i* may only look at
+   bars up to *i*.
+3. Optional: `checklist()` rows for status messages; `flat_hhmm` for intraday strategies.
+4. Add a `[[watch]]` with `strategy = "my_idea"`, then run `signalbot backtest <watch> --days 120`.
+5. Add a test in `tests/test_strategies.py`.
 
-```bash
-goldbot backtest --days 110 --compare tests/fixtures/tradingview_gcz2026_trades.csv
-```
-Lists every trade the bot would have taken, the win rate, and how many of TradingView's trades it
-also took. Expect almost all of them. Small differences can come from where history starts
-(indicator warm-up and whether a trade was already open) and from tiny volume differences between
-data vendors. If many are missing, open an issue in this repo with the output.
+The engine handles next-bar-open fills, stop and target (including TradingView's rule for bars
+that touch both), one trade at a time, and time exits. So a strategy written from a TradingView
+script will give the same trades as the TradingView Strategy Tester.
 
 ## Run in the background (macOS)
 
-`launchd` keeps it running and restarts it after a crash or reboot. Create
-`~/Library/LaunchAgents/com.goldbot.plist` (adjust the two paths):
-
+`~/Library/LaunchAgents/com.signalbot.plist` (adjust the paths):
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.goldbot</string>
-  <key>WorkingDirectory</key><string>/Users/YOU/gold-signal-bot</string>
+  <key>Label</key><string>com.signalbot</string>
+  <key>WorkingDirectory</key><string>/Users/YOU/signal-bot</string>
   <key>ProgramArguments</key><array>
-    <string>/Users/YOU/gold-signal-bot/.venv/bin/goldbot</string><string>run</string>
+    <string>/Users/YOU/signal-bot/.venv/bin/signalbot</string><string>run</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/goldbot.log</string>
-  <key>StandardErrorPath</key><string>/tmp/goldbot.log</string>
+  <key>StandardOutPath</key><string>/tmp/signalbot.log</string>
+  <key>StandardErrorPath</key><string>/tmp/signalbot.log</string>
 </dict></plist>
 ```
 ```bash
-launchctl load ~/Library/LaunchAgents/com.goldbot.plist     # start
-tail -f /tmp/goldbot.log                                     # watch
-launchctl unload ~/Library/LaunchAgents/com.goldbot.plist   # stop
+launchctl load ~/Library/LaunchAgents/com.signalbot.plist    # start
+tail -f /tmp/signalbot.log
+launchctl unload ~/Library/LaunchAgents/com.signalbot.plist  # stop
 ```
-The Mac must be awake at 7:20–9:30 CT (System Settings → Battery/Energy → prevent sleep when
-plugged in, or `caffeinate -s` while it runs).
+Keep the Mac awake during your trading windows (Energy settings, or `caffeinate -s`).
+Restarts are safe: sent alerts are remembered in `~/.signalbot/sent.json`.
 
-## Commands
+## Other details
 
-| Command | What it does |
-|---|---|
-| `goldbot run [--dry-run]` | live alerts |
-| `goldbot check` | connect + print the current checklist |
-| `goldbot backtest --days N [--compare CSV] [--csv BARS]` | replay on tastytrade history (or a bars CSV) |
-| `goldbot test-notify` | send a test push |
-
-All read `config.toml` in the current folder (`-c path` to change).
-
-## Contract rolls
-
-`symbol = "auto"` follows tastytrade's active GC month, so the roll from December to February
-happens by itself. To pin a contract, set e.g. `symbol = "/GCG7"`.
-
-## News days
-
-`[news_days]` in `config.toml` has the 2026 CPI and jobs-report dates (same as the TradingView
-script). With `fetch_news_calendar = true` the bot also reads this week's calendar from
-ForexFactory every day, so a missing or moved date is still caught. Add 2027 dates when the BLS
-publishes them.
+- **Contract rolls**: `symbol = "auto"` follows tastytrade's active month automatically.
+- **News days**: `[news_days]` in config (2026 CPI / jobs dates) plus this week's ForexFactory
+  calendar when `fetch_news_calendar = true`. Add 2027 dates when BLS publishes them.
+- **Heartbeat**: weekdays at 7:15 CT, a "running" message with each watch's checklist.
+- **Watchdog**: an alert if a watch gets no new candles for 45 minutes while the market is open.
 
 ## Development
-
 ```bash
-pytest           # indicator + strategy tests
+pytest
 ```
-Code map: `indicators.py` (Pine-equivalent indicators), `strategy.py` (checks + trade simulation),
-`feed.py` (tastytrade candles), `news.py`, `notify.py`, `messages.py`, `cli.py`.
+`tests/fixtures/metals_regression.json` locks the gold strategy's trades so refactors can't
+silently change them.
 
 ---
 Educational tool, not financial advice. Backtests don't guarantee future results; paper trade first.

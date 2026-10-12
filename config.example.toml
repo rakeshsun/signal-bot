@@ -1,54 +1,56 @@
-# Copy to config.toml and edit. Secrets (tastytrade) go in .env, not here.
+# Copy to config.toml and edit. Broker secrets go in .env, not here.
 
-# Which contract to watch: "auto" = the active GC month on tastytrade, or a symbol like "/GCZ6".
-# Signals use full-size GC data (same as the TradingView backtest); trade /MGC or /GC from them.
-symbol = "auto"
-product = "GC"
-
-# Days of 15-minute history loaded at start-up (indicator warm-up). 30 is plenty.
+# Days of history loaded at start-up (indicator warm-up).
 history_days = 30
 
-# Daily "bot is alive" message (Chicago time, weekdays). -1 turns it off.
+# Weekday "bot is running" message (Chicago time). -1 turns it off.
 heartbeat_hhmm = 715
 
 # Also read this week's CPI / jobs-report dates from the ForexFactory feed.
 fetch_news_calendar = true
 
 [notify]
-# Free phone push: install the "ntfy" app, subscribe to this topic name.
-# Pick something hard to guess - anyone who knows the topic can read it.
+# Free phone push: install "ntfy" (developer Philipp Heckel) and subscribe to this topic.
+# Pick a hard-to-guess name - anyone who knows it can read your alerts.
 ntfy_topic = ""
-# Optional Telegram bot instead of / as well as ntfy
 telegram_token = ""
 telegram_chat_id = ""
-# macOS banner when running on a Mac
 macos_banner = true
 
-[strategy]
-# Same values as the TradingView "Metals Confluence Strategy" inputs. Leave as-is unless you re-test.
-fast_len = 20
-slow_len = 50
-trend_len = 200
-adx_len = 14
-adx_min = 20.0
-rsi_len = 14
-rsi_lo_long = 45.0
-rsi_hi_long = 70.0
-rsi_hi_short = 55.0
-rsi_lo_short = 30.0
-use_macd = true
-use_vol = true
-vol_len = 20
-pb_bars = 5
-do_long = true
-do_short = true
-session_start = 720   # 7:20 am CT
-session_end = 930     # 9:30 am CT
-atr_len = 14
+# ─────────────────────────── Watches ───────────────────────────
+# Each [[watch]] runs one strategy on one instrument. Add as many as you like.
+# `signalbot strategies` lists the available strategies and their params.
+# symbol: "auto" + product = active futures month; or "/GCZ6"; or a stock ticker like "SPY".
+
+[[watch]]
+name = "gold"
+strategy = "metals_confluence"
+symbol = "auto"
+product = "GC"
+interval = "15m"
+enabled = true
+news_alert = true                       # 7:00 CT heads-up on CPI / jobs days
+contracts = { "/MGC" = 10, "/GC" = 100 } # $ per point, shown in alerts
+point_value = 100                       # $ per point of the data symbol (backtest totals)
+
+[watch.params]   # overrides; omit to use the tested defaults
 atr_mult = 1.75
 rr = 1.5
-news_mode = "skip_7_8"   # "off" | "skip_7_8" | "skip_session"
-point_value = 100.0      # GC = $100/pt (used for backtest $ only)
+session_start = 720
+session_end = 930
+
+[[watch]]
+name = "es"
+strategy = "es_range_breakout"
+symbol = "auto"
+product = "ES"
+interval = "15m"
+enabled = false                         # thin edge - turn on to paper trade it
+contracts = { "/MES" = 5, "/ES" = 50 }
+point_value = 50
+
+[watch.params]
+rr = 1.0
 
 [news_days]
 # CPI / jobs report days (release 7:30 CT). Add 2027 dates when BLS publishes them.
