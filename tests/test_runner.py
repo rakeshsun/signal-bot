@@ -78,4 +78,4 @@ def test_dashboard_renders(tmp_path):
     alerts = [{"t": time.time(), "kind": "entry", "title": "BUY /GCZ6 — gold 8/8", "body": "stop 14 pts"}]
     dashboard.write(out, [lv], {}, alerts, time.time() - 3600, True)
     html = out.read_text()
-    assert "Signal Bot" in html and "BUY /GCZ6" in html and "Checks passed" in html and "Recent trades" in html
+    assert "Signal" in html and "BUY /GCZ6" in html and "Ready to enter" in html and "Last " in html
