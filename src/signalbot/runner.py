@@ -111,7 +111,9 @@ async def run_live(s: Settings, dry_run: bool = False) -> None:
         for ev in lv.res.events:
             sent.add(f"{lv.watch.name}|{ev.kind}|{ev.bar_time}")
         start_msgs.append(messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(bars, ctx)))
-    notifier.send("Signal bot started", "\n\n".join(start_msgs))
+    # start-up goes to the log only: restarts happen (login, crashes, config changes) and the
+    # weekday 7:15 heartbeat already tells you the bot is alive
+    log.info("started:\n%s", "\n\n".join(start_msgs))
 
     heartbeat_on: date | None = None
     news_alerted: set[date] = set()
@@ -154,7 +156,11 @@ async def run_live(s: Settings, dry_run: bool = False) -> None:
                         notifier.send(*messages.exit_(ev.trade, lv.watch, lv.symbol))
 
             # weekday heartbeat
-            if s.heartbeat_hhmm >= 0 and now_hm >= s.heartbeat_hhmm and heartbeat_on != today and today.weekday() < 5:
+            # once per weekday, only inside a 30-minute window after heartbeat_hhmm (a restart later
+            # in the day doesn't re-send it), remembered across restarts via the sent log
+            hb_end = s.heartbeat_hhmm + 30 if s.heartbeat_hhmm % 100 < 30 else s.heartbeat_hhmm + 70
+            if (s.heartbeat_hhmm >= 0 and s.heartbeat_hhmm <= now_hm < hb_end and heartbeat_on != today
+                    and today.weekday() < 5 and sent.add(f"heartbeat|{today}")):
                 heartbeat_on = today
                 head = f"News today: {nd[today]} at 7:30 CT" if today in nd else "News today: none"
                 parts = [head]
