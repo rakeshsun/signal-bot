@@ -1,0 +1,72 @@
+# Copy to config.toml and edit. Secrets (tastytrade) go in .env, not here.
+
+# Which contract to watch: "auto" = the active GC month on tastytrade, or a symbol like "/GCZ6".
+# Signals use full-size GC data (same as the TradingView backtest); trade /MGC or /GC from them.
+symbol = "auto"
+product = "GC"
+
+# Days of 15-minute history loaded at start-up (indicator warm-up). 30 is plenty.
+history_days = 30
+
+# Daily "bot is alive" message (Chicago time, weekdays). -1 turns it off.
+heartbeat_hhmm = 715
+
+# Also read this week's CPI / jobs-report dates from the ForexFactory feed.
+fetch_news_calendar = true
+
+[notify]
+# Free phone push: install the "ntfy" app, subscribe to this topic name.
+# Pick something hard to guess - anyone who knows the topic can read it.
+ntfy_topic = ""
+# Optional Telegram bot instead of / as well as ntfy
+telegram_token = ""
+telegram_chat_id = ""
+# macOS banner when running on a Mac
+macos_banner = true
+
+[strategy]
+# Same values as the TradingView "Metals Confluence Strategy" inputs. Leave as-is unless you re-test.
+fast_len = 20
+slow_len = 50
+trend_len = 200
+adx_len = 14
+adx_min = 20.0
+rsi_len = 14
+rsi_lo_long = 45.0
+rsi_hi_long = 70.0
+rsi_hi_short = 55.0
+rsi_lo_short = 30.0
+use_macd = true
+use_vol = true
+vol_len = 20
+pb_bars = 5
+do_long = true
+do_short = true
+session_start = 720   # 7:20 am CT
+session_end = 930     # 9:30 am CT
+atr_len = 14
+atr_mult = 1.75
+rr = 1.5
+news_mode = "skip_7_8"   # "off" | "skip_7_8" | "skip_session"
+point_value = 100.0      # GC = $100/pt (used for backtest $ only)
+
+[news_days]
+# CPI / jobs report days (release 7:30 CT). Add 2027 dates when BLS publishes them.
+"2026-04-03" = "Jobs report"
+"2026-04-10" = "CPI"
+"2026-05-08" = "Jobs report"
+"2026-05-12" = "CPI"
+"2026-06-05" = "Jobs report"
+"2026-06-10" = "CPI"
+"2026-07-02" = "Jobs report"
+"2026-07-14" = "CPI"
+"2026-08-07" = "Jobs report"
+"2026-08-12" = "CPI"
+"2026-09-04" = "Jobs report"
+"2026-09-11" = "CPI"
+"2026-10-02" = "Jobs report"
+"2026-10-14" = "CPI"
+"2026-11-06" = "Jobs report"
+"2026-11-10" = "CPI"
+"2026-12-04" = "Jobs report"
+"2026-12-10" = "CPI"
