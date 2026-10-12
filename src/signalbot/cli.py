@@ -110,6 +110,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="signalbot", description="Trading strategy signal bot (tastytrade data, phone alerts)")
     ap.add_argument("-c", "--config", default="config.toml")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--log-file", type=Path, help="write the log here, rotated every midnight (Chicago time)")
+    ap.add_argument("--keep-days", type=int, default=7, help="days of rotated logs to keep (default 7)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="watch live candles for all enabled watches and send alerts")
     r.add_argument("--dry-run", action="store_true", help="print alerts instead of sending them")
@@ -124,7 +126,15 @@ def main() -> None:
     sub.add_parser("test-notify", help="send a test notification")
     a = ap.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    fmt = "%(asctime)s %(levelname)s %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if a.log_file:
+        # end-of-day cleanup: start a new file at midnight, delete files older than --keep-days
+        from logging.handlers import TimedRotatingFileHandler
+
+        a.log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers = [TimedRotatingFileHandler(a.log_file, when="midnight", backupCount=a.keep_days, encoding="utf-8")]
+    logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format=fmt, handlers=handlers)
     if not a.verbose:  # the tastytrade SDK logs every stream message at DEBUG; keep the log small
         try:
             import tastytrade  # noqa: F401  (its import sets its logger to DEBUG, so import first)

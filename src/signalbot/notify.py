@@ -6,6 +6,7 @@ import json
 import logging
 import platform
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 
@@ -30,7 +31,9 @@ class Notifier:
         self.dry_run = dry_run
 
     def send(self, title: str, body: str, urgent: bool = False) -> None:
-        print(f"\n=== {title} ===\n{body}\n", flush=True)
+        if sys.stdout.isatty():
+            print(f"\n=== {title} ===\n{body}\n", flush=True)
+        log.info("ALERT %s | %s", title, body.replace("\n", " / "))
         if self.dry_run:
             return
         if self.cfg.ntfy_topic:

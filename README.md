@@ -133,12 +133,15 @@ What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`
 - starts now and **at every login**; no terminal or VS Code needs to stay open;
 - **restarts itself** if it crashes or the connection drops;
 - keeps the Mac from idle-sleeping while it runs (`caffeinate -i`);
-- writes its log to `logs/signalbot.log`.
+- writes its log to `logs/signalbot.log`, **cleaned up automatically**: at midnight the day's
+  log is renamed (`signalbot.log.2026-10-12`) and files older than 7 days are deleted.
+  Crashes / startup errors go to `logs/crash.log`.
 
 | Command | What it does |
 |---|---|
 | `./scripts/service.sh status` | is it running? |
 | `./scripts/service.sh logs` | follow the live log (Ctrl+C to exit) |
+| `./scripts/service.sh errors` | last startup errors / crashes |
 | `./scripts/service.sh restart` | after editing `config.toml` or pulling new code |
 | `./scripts/service.sh stop` / `start` | stop / start it |
 | `./scripts/service.sh uninstall` | remove the background service |
@@ -152,8 +155,8 @@ What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`
 - **Mac must be awake.** With the lid closed on battery it sleeps and no alerts go out. Keep
   it plugged in, or open, during your trading window.
 - **Changed `config.toml` or updated the code** (`git pull`): `./scripts/service.sh restart`.
-- **Log too big?** `: > logs/signalbot.log` empties it. Normal logging is a few lines per day;
-  run commands with `-v` for full debug output.
+- **Logs clean themselves up** (new file each midnight, 7 days kept). To keep more or fewer
+  days, change `--keep-days` in `scripts/service.sh` and run `./scripts/service.sh restart`.
 - **Duplicate alerts?** Don't also run `signalbot run` in a terminal while the service is
   running. Use `signalbot run --dry-run` for experiments, or stop the service first.
 
