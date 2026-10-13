@@ -63,20 +63,22 @@ session_end = 200
 
 [[watch]]
 name = "gold-levels"
-strategy = "levels_fvg"                 # prior-day / overnight high-low + fair value gaps
+strategy = "levels_fvg"                 # key levels + fair value gaps combined
 symbol = "auto"
 product = "GC"
 interval = "15m"
-enabled = false                         # 1-year test: no setup beat metals_confluence - paper only if you turn it on
-paper = true
+enabled = true
+paper = true                            # alerts say PAPER: watch / paper trade only
 contracts = { "/MGC" = 10, "/GC" = 100 }
 point_value = 100
 
-[watch.params]   # best 1-yr result: FVG retest in Asia (163 trades, 42% wins, PF 1.19, both halves >1.1)
-mode = "fvg_retest"                     # "sweep_fvg" | "fvg_retest" | "level_reject"
+[watch.params]   # FVG that forms at prior-day high/low, then retested - Asia session
+# 1-year test: 39 trades, 46% wins, PF 1.94, profitable both halves, never same night as gold-asia
+mode = "level_fvg"                      # "level_fvg" | "sweep_fvg" | "fvg_retest" | "level_reject"
 session_start = 1800
 session_end = 200
-rr = 1.5
+rr = 2.0
+trend_filter = false
 
 
 [[watch]]

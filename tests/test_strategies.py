@@ -89,8 +89,8 @@ def test_levels_fvg_runs_all_modes_without_lookahead():
     cls = strategies.get("levels_fvg")
     c, v = random_walk(seed=11)
     bars = make_bars(c, vol=v)
-    for mode in ("sweep_fvg", "fvg_retest", "level_reject"):
-        p = cls.make_params({"mode": mode, "session_start": 0, "session_end": 2359})
+    for mode in ("level_fvg", "sweep_fvg", "fvg_retest", "level_reject"):
+        p = cls.make_params({"mode": mode, "session_start": 0, "session_end": 2359, "trend_filter": False})
         full = cls(p).signals(bars, Context())
         cut = cls(p).signals(bars[:2000], Context())
         # signals on the first 2000 bars must not change when later bars are added

@@ -14,6 +14,10 @@ Setups (``mode``):
   * "fvg_retest"   - with the trend (EMA 20 > 50, price above EMA 200 for longs), price comes back
                      into an untouched gap from the last N bars and closes back out of it in the
                      trend direction. Stop beyond the far side of the gap.
+  * "level_fvg"    - combined: a gap that formed AT a key level (within level_near_atr x ATR)
+                     is retested - price dips back into it and closes out the far side. Longs use
+                     gaps at support (PDL/ONL), shorts gaps at resistance (PDH/ONH). Stop beyond
+                     the far side of the gap or the level, whichever is further.
   * "level_reject" - a bar pokes through a key level and closes back with a long wick (close in
                      the outer third of its range). Stop beyond the wick.
 Target = rr x risk. Trades whose stop would be wider than max_risk_atr x ATR are skipped.
@@ -49,7 +53,7 @@ class LevelsFvg(Strategy):
 
     @dataclass
     class Params:
-        mode: str = "sweep_fvg"  # "sweep_fvg" | "fvg_retest" | "level_reject"
+        mode: str = "level_fvg"  # "level_fvg" | "sweep_fvg" | "fvg_retest" | "level_reject"
         session_start: int = 720
         session_end: int = 1100
         rr: float = 2.0
@@ -59,6 +63,8 @@ class LevelsFvg(Strategy):
         sweep_lookback: int = 6  # bars between the sweep and the gap (sweep_fvg)
         fvg_lookback: int = 20  # how old a gap may be (fvg_retest)
         min_gap_atr: float = 0.15  # ignore tiny gaps
+        level_near_atr: float = 0.5  # level_fvg: gap must sit within this many ATR of a key level
+        trend_filter: bool = True  # level_fvg: only trade with the EMA 20/50 trend
         use_pd: bool = True  # prior-day high/low
         use_on: bool = True  # overnight high/low
         do_long: bool = True
@@ -131,6 +137,8 @@ class LevelsFvg(Strategy):
         last_sweep_high: tuple[int, float] | None = None
         bull_gaps: list[tuple[int, float, float]] = []  # (formed at i, bottom, top), untouched
         bear_gaps: list[tuple[int, float, float]] = []
+        lvl_bull: list[tuple[int, float, float, str, float]] = []  # + (level name, level price)
+        lvl_bear: list[tuple[int, float, float, str, float]] = []
 
         for i in range(2, n):
             a = atr[i]
@@ -177,6 +185,19 @@ class LevelsFvg(Strategy):
                             if i - k <= p.fvg_lookback and k < i - 1 and h[i] >= bot and h[i] < top and c[i] < bot and c[i] < o[i]:
                                 sig = self._mk(-1, c[i], top + p.stop_buffer_atr * a, a, "bearish FVG retest")
                                 break
+                elif p.mode == "level_fvg":
+                    up = ema20[i] is not None and ema50[i] is not None and ema20[i] > ema50[i]
+                    dn = ema20[i] is not None and ema50[i] is not None and ema20[i] < ema50[i]
+                    if p.do_long and (up or not p.trend_filter):
+                        for k, bot, top, name, lv in reversed(lvl_bull):
+                            if k < i - 1 and lo[i] <= top and lo[i] > min(bot, lv) - 0.25 * a and c[i] > top and c[i] > o[i]:
+                                sig = self._mk(1, c[i], min(bot, lv) - p.stop_buffer_atr * a, a, f"bullish FVG at {name}")
+                                break
+                    if sig is None and p.do_short and (dn or not p.trend_filter):
+                        for k, bot, top, name, lv in reversed(lvl_bear):
+                            if k < i - 1 and h[i] >= bot and h[i] < max(top, lv) + 0.25 * a and c[i] < bot and c[i] < o[i]:
+                                sig = self._mk(-1, c[i], max(top, lv) + p.stop_buffer_atr * a, a, f"bearish FVG at {name}")
+                                break
                 elif p.mode == "level_reject":
                     rng = h[i] - lo[i]
                     if rng > 0:
@@ -195,10 +216,26 @@ class LevelsFvg(Strategy):
             # gap bookkeeping (after using existing gaps on this bar)
             bull_gaps = [(k, b_, t_) for k, b_, t_ in bull_gaps if i - k <= p.fvg_lookback and lo[i] > b_]  # filled -> gone
             bear_gaps = [(k, b_, t_) for k, b_, t_ in bear_gaps if i - k <= p.fvg_lookback and h[i] < t_]
+            if out[i] is not None:  # a gap is used once
+                lvl_bull = [g for g in lvl_bull if not (out[i].direction > 0 and lo[i] <= g[2])]
+                lvl_bear = [g for g in lvl_bear if not (out[i].direction < 0 and h[i] >= g[1])]
+            lvl_bull = [g for g in lvl_bull if i - g[0] <= p.fvg_lookback and lo[i] > min(g[1], g[4]) - 0.25 * a]
+            lvl_bear = [g for g in lvl_bear if i - g[0] <= p.fvg_lookback and h[i] < max(g[2], g[4]) + 0.25 * a]
             if new_bull:
                 bull_gaps.append((i, h[i - 2], lo[i]))
+                # gap launched from support: the 3-bar move's low is near a support level
+                base = min(lo[i - 2], lo[i - 1])
+                for name, lv in sup:
+                    if abs(base - lv) <= p.level_near_atr * a or (base < lv < lo[i]):
+                        lvl_bull.append((i, h[i - 2], lo[i], name, lv))
+                        break
             if new_bear:
                 bear_gaps.append((i, h[i], lo[i - 2]))
+                base = max(h[i - 2], h[i - 1])
+                for name, lv in res:
+                    if abs(base - lv) <= p.level_near_atr * a or (h[i] < lv < base):
+                        lvl_bear.append((i, h[i], lo[i - 2], name, lv))
+                        break
         return out
 
     def _mk(self, d: int, entry: float, stop: float, a: float, why: str) -> Signal | None:
