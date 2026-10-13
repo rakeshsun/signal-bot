@@ -191,6 +191,20 @@ If its "updated" time is old, the bot has stopped.
 - **Heartbeat**: weekdays at 7:15 CT, a "running" message with each watch's checklist.
 - **Watchdog**: an alert if a watch gets no new candles for 45 minutes while the market is open.
 
+## One year of history (Databento)
+
+tastytrade only streams a few months of 15-minute history, so for longer backtests download real
+CME data from [Databento](https://databento.com) (pay-as-you-go; new accounts have come with free
+credit, and a year of 1-minute gold bars costs little):
+
+```bash
+pip install -e ".[data]"
+echo "DATABENTO_API_KEY=db-..." >> .env          # Databento portal -> API keys
+python scripts/fetch_databento.py --root GC --days 365   # shows the cost and asks first
+signalbot backtest gold --csv data/GC_15m.csv
+signalbot backtest gold --csv data/GC_15m.csv --set session_end=830   # compare windows
+```
+
 ## Development
 ```bash
 pytest
