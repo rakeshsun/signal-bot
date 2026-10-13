@@ -83,3 +83,18 @@ def test_metals_overnight_window_and_skip_bars():
     skip = sorted(times)[0]
     skipped = evaluate(cls(cls.make_params({"skip_bars": str(int(skip))})), bars, Context())
     assert all(datetime.fromtimestamp(t.signal_time / 1000, tz=CHICAGO).strftime("%H%M") != skip for t in skipped.trades)
+
+
+def test_levels_fvg_runs_all_modes_without_lookahead():
+    cls = strategies.get("levels_fvg")
+    c, v = random_walk(seed=11)
+    bars = make_bars(c, vol=v)
+    for mode in ("sweep_fvg", "fvg_retest", "level_reject"):
+        p = cls.make_params({"mode": mode, "session_start": 0, "session_end": 2359})
+        full = cls(p).signals(bars, Context())
+        cut = cls(p).signals(bars[:2000], Context())
+        # signals on the first 2000 bars must not change when later bars are added
+        assert [(s.direction, s.stop) if s else None for s in full[:2000]] == [(s.direction, s.stop) if s else None for s in cut]
+        for s, b in zip(full, bars):
+            if s:
+                assert (b.close - s.stop) * s.direction > 0 and (s.target - b.close) * s.direction > 0

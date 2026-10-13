@@ -62,6 +62,24 @@ session_end = 200
 
 
 [[watch]]
+name = "gold-levels"
+strategy = "levels_fvg"                 # prior-day / overnight high-low + fair value gaps
+symbol = "auto"
+product = "GC"
+interval = "15m"
+enabled = false                         # 1-year test: no setup beat metals_confluence - paper only if you turn it on
+paper = true
+contracts = { "/MGC" = 10, "/GC" = 100 }
+point_value = 100
+
+[watch.params]   # best 1-yr result: FVG retest in Asia (163 trades, 42% wins, PF 1.19, both halves >1.1)
+mode = "fvg_retest"                     # "sweep_fvg" | "fvg_retest" | "level_reject"
+session_start = 1800
+session_end = 200
+rr = 1.5
+
+
+[[watch]]
 name = "es"
 strategy = "es_range_breakout"
 symbol = "auto"
