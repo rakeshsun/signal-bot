@@ -98,3 +98,18 @@ def test_levels_fvg_runs_all_modes_without_lookahead():
         for s, b in zip(full, bars):
             if s:
                 assert (b.close - s.stop) * s.direction > 0 and (s.target - b.close) * s.direction > 0
+
+
+def test_smc_no_lookahead_and_sane_stops():
+    cls = strategies.get("smc")
+    c, v = random_walk(seed=23)
+    bars = make_bars(c, vol=v)
+    for zone in ("ob", "fvg"):
+        p = cls.make_params({"zone": zone, "discount": False, "session_start": 0, "session_end": 2359})
+        full = cls(p).signals(bars, Context())
+        cut = cls(p).signals(bars[:2000], Context())
+        assert [(s.direction, s.stop) if s else None for s in full[:2000]] == [(s.direction, s.stop) if s else None for s in cut]
+        assert any(full)
+        for s, b in zip(full, bars):
+            if s:
+                assert (b.close - s.stop) * s.direction > 0 and (s.target - b.close) * s.direction > 0

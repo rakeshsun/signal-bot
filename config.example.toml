@@ -82,6 +82,27 @@ trend_filter = false
 
 
 [[watch]]
+name = "gold-smc"
+strategy = "smc"                        # Smart Money Concepts: BOS/CHoCH + order block pullback
+symbol = "auto"
+product = "GC"
+interval = "15m"
+enabled = true
+paper = true                            # alerts say PAPER: watch / paper trade only
+contracts = { "/MGC" = 10, "/GC" = 100 }
+point_value = 100
+
+[watch.params]   # London session 2-7 AM CT
+# 1-year test: 99 trades, 37% wins, PF 1.71, profitable both halves (shorts did most of the work)
+breaks = "both"                         # "choch" | "bos" | "both"
+zone = "ob"                             # "ob" (order block) | "fvg"
+discount = false
+session_start = 200
+session_end = 700
+rr = 2.0
+
+
+[[watch]]
 name = "es"
 strategy = "es_range_breakout"
 symbol = "auto"
