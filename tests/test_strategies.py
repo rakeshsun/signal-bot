@@ -66,3 +66,20 @@ def test_example_config_loads():
     for w in s.watches:
         cls = strategies.get(w.strategy)
         cls.make_params(w.params)
+
+
+def test_metals_overnight_window_and_skip_bars():
+    cls = strategies.get("metals_confluence")
+    c, v = random_walk(seed=5)
+    bars = make_bars(c, vol=v)
+    asia = evaluate(cls(cls.make_params({"session_start": 1800, "session_end": 200})), bars, Context())
+    assert asia.trades
+    for t in asia.trades:
+        d = datetime.fromtimestamp(t.signal_time / 1000, tz=CHICAGO)
+        hm = d.hour * 100 + d.minute
+        assert hm >= 1800 or hm < 200
+    base = evaluate(cls(), bars, Context())
+    times = {datetime.fromtimestamp(t.signal_time / 1000, tz=CHICAGO).strftime("%H%M") for t in base.trades}
+    skip = sorted(times)[0]
+    skipped = evaluate(cls(cls.make_params({"skip_bars": str(int(skip))})), bars, Context())
+    assert all(datetime.fromtimestamp(t.signal_time / 1000, tz=CHICAGO).strftime("%H%M") != skip for t in skipped.trades)

@@ -58,6 +58,7 @@ class MetalsConfluence(Strategy):
         atr_mult: float = 1.75
         rr: float = 1.5
         news_mode: str = "skip_7_8"  # "off" | "skip_7_8" | "skip_session"
+        skip_bars: str = ""  # signal bars to ignore, by open time HHMM, comma separated, e.g. "745"
 
     def _checks(self, bars: list[Bar]) -> tuple[list[tuple[list[bool], list[bool]] | None], list[float | None]]:
         p = self.p
@@ -110,6 +111,7 @@ class MetalsConfluence(Strategy):
     def signals(self, bars: list[Bar], ctx: Context) -> list[Signal | None]:
         p = self.p
         checks, atr = self._checks(bars)
+        skip = {int(x) for x in str(p.skip_bars).replace(" ", "").split(",") if x}
         out: list[Signal | None] = []
         for i, bar in enumerate(bars):
             ck = checks[i]
@@ -125,7 +127,7 @@ class MetalsConfluence(Strategy):
                 in_sess = p.session_start <= t < p.session_end
             else:  # session crossing midnight, e.g. Asia 1800-0200
                 in_sess = t >= p.session_start or t < p.session_end
-            if not in_sess or blocked:
+            if not in_sess or blocked or t in skip:
                 out.append(None)
                 continue
             go_long = p.do_long and all(ck[0])

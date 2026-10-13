@@ -22,6 +22,7 @@ class Watch:
     interval: str = "15m"
     enabled: bool = True
     news_alert: bool = False  # heads-up at 7:00 CT on CPI / jobs days
+    paper: bool = False  # alerts are marked PAPER: for watching / paper trading, not real money
     contracts: dict[str, float] = field(default_factory=dict)  # name -> $ per point, for alert lines
     point_value: float = 1.0  # $ per point of the data symbol, for backtest totals
     params: dict[str, Any] = field(default_factory=dict)

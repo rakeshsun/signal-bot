@@ -37,7 +37,24 @@ point_value = 100                       # $ per point of the data symbol (backte
 atr_mult = 1.75
 rr = 1.5
 session_start = 720
-session_end = 930
+session_end = 830     # 1-year test: before the 8:30 US open is clearly better
+skip_bars = "745"     # signal bar right after 7:30 CT data releases: 1 win in 10 over the year
+
+[[watch]]
+name = "gold-asia"
+strategy = "metals_confluence"
+symbol = "auto"
+product = "GC"
+interval = "15m"
+enabled = true
+paper = true                            # alerts say PAPER: watch / paper trade only
+contracts = { "/MGC" = 10, "/GC" = 100 }
+point_value = 100
+
+[watch.params]   # Asia session 6 PM - 2 AM CT (1-year test: 43% wins, PF 1.4, profitable both halves)
+session_start = 1800
+session_end = 200
+
 
 [[watch]]
 name = "es"
@@ -53,6 +70,17 @@ point_value = 50
 rr = 1.0
 
 [news_days]
+# Oct 2025 - Mar 2026 (shutdown-shifted dates; Oct 2025 CPI and jobs were canceled)
+"2025-10-24" = "CPI"
+"2025-11-20" = "Jobs report"
+"2025-12-16" = "Jobs report"
+"2025-12-18" = "CPI"
+"2026-01-09" = "Jobs report"
+"2026-01-13" = "CPI"
+"2026-02-11" = "Jobs report"
+"2026-02-13" = "CPI"
+"2026-03-06" = "Jobs report"
+"2026-03-11" = "CPI"
 # CPI / jobs report days (release 7:30 CT). Add 2027 dates when BLS publishes them.
 "2026-04-03" = "Jobs report"
 "2026-04-10" = "CPI"

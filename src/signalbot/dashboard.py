@@ -109,7 +109,7 @@ def _window(lv) -> str:
     b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
     if a is None or b is None:
         return "its session hours"
-    f = lambda h: datetime(2000, 1, 1, h // 100, h % 100).strftime("%-I:%M")  # noqa: E731
+    f = lambda h: datetime(2000, 1, 1, h // 100, h % 100).strftime("%-I:%M %p")  # noqa: E731
     return f"{f(a)} and {f(b)} CT"
 
 
@@ -120,6 +120,8 @@ def _timeline(lv, news_today: str | None) -> str:
     b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
     if a is None or b is None:
         return ""
+    if a > b:  # overnight window (e.g. Asia): the morning strip doesn't apply
+        return f'<p class="tl-cap">Entry window {_window(lv)} (overnight)</p>'
     start, end = 6 * 60, 12 * 60
 
     def x(hhmm: int) -> float:
@@ -234,7 +236,7 @@ def _watch(lv, nd) -> str:
     last = bars[-1]
     news_today = nd.get(datetime.now(CHICAGO).date())
     return f"""<section class="watch">
-  <header class="wh"><h2>{E(w.name.title())}</h2><p>{E(lv.symbol)} on {E(w.interval)} bars, strategy {E(w.strategy.replace('_', ' '))}</p></header>
+  <header class="wh"><h2>{E(w.name.title())}{' <span class="paper">paper</span>' if w.paper else ''}</h2><p>{E(lv.symbol)} on {E(w.interval)} bars, strategy {E(w.strategy.replace('_', ' '))}</p></header>
   <div class="cols">
     <div class="col-a">{_position(lv, last)}{_timeline(lv, news_today)}</div>
     <div class="col-b"><h3>Ready to enter?</h3>{_checks(lv, nd)}</div>
@@ -338,6 +340,7 @@ details summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .al p{margin:6px 0 0;font-size:13px;color:var(--soft)}
 .al.entry summary{color:var(--gold)}.al.warning summary{color:var(--down)}
 .muted{color:var(--soft)}
+.paper{font-size:12px;font-weight:600;vertical-align:middle;border:1px solid var(--soft);color:var(--soft);border-radius:99px;padding:1px 8px;margin-left:6px;font-stretch:100%}
 h4{margin:12px 0 8px;font-size:13px;font-weight:600}h4 span{color:var(--soft);font-weight:400}
 .live{border:1px dashed var(--gold);border-radius:10px;padding:4px 12px 10px;margin-bottom:6px;background:color-mix(in srgb,var(--gold-2) 30%,transparent)}
 .miss{font-size:13px;margin:4px 0 2px}.small{font-size:12px;margin:2px 0 0}.hist{font-size:13px;color:var(--soft);margin:12px 0 0}
@@ -370,7 +373,10 @@ def _in_window(lv, now: datetime) -> bool | None:
     b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
     if a is None or b is None:
         return None
-    return now.weekday() < 5 and a <= now.hour * 100 + now.minute < b
+    hm = now.hour * 100 + now.minute
+    if a > b:  # overnight window
+        return (hm >= a and now.weekday() in (6, 0, 1, 2, 3)) or (hm < b and now.weekday() in (0, 1, 2, 3, 4))
+    return now.weekday() < 5 and a <= hm < b
 
 
 def _action(lv) -> str:
@@ -379,7 +385,7 @@ def _action(lv) -> str:
     now_ms = time.time() * 1000
     now = datetime.now(CHICAGO)
     res = lv.res
-    name = f"{E(lv.watch.name.title())} {E(lv.symbol)}"
+    name = f"{E(lv.watch.name.title())} {E(lv.symbol)}{' (paper)' if lv.watch.paper else ''}"
     names = " or ".join(contract_names(lv.watch, lv.symbol)) or lv.symbol
     t = res.open_trade if res else None
     if t:

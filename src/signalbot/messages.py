@@ -59,7 +59,8 @@ def entry(t: Trade, w: Watch, symbol: str, res: Result, bar_ms: int) -> tuple[st
     lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, then right away place a stop "
                  f"{t.risk:.2f} pts {below} and a limit {t.reward:.2f} pts {above} your fill price. Signal only, not advice.")
     extra = " · ".join(f"{v}" for v in t.info.values())
-    return f"{side} {symbol} — {w.name}{(' ' + extra) if extra else ''}", "\n".join(lines)
+    tag = "PAPER " if w.paper else ""
+    return f"{tag}{side} {symbol} — {w.name}{(' ' + extra) if extra else ''}", "\n".join(lines)
 
 
 def exit_(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
@@ -75,7 +76,7 @@ def exit_(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
         + ("Close your position now (end-of-day exit)." if t.exit_reason == "time"
            else "If your stop / limit orders were in place, the position should be closed. Check Robinhood and cancel the other order.")
     )
-    return f"{symbol} {w.name}: {reason}", body
+    return f"{'PAPER ' if w.paper else ''}{symbol} {w.name}: {reason}", body
 
 
 def news(name: str) -> tuple[str, str]:
