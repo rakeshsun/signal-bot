@@ -25,6 +25,11 @@ macos_banner = true
 [[watch]]
 name = "gold"
 strategy = "metals_confluence"
+# Which gold contract to watch:
+#   "auto"   = the active (most traded) month; switches by itself at each roll
+#   "/GCG27" = February 2027 (also /GCZ26 Dec 2026, /GCJ27 Apr 2027 ...). Month codes:
+#              F Jan, G Feb, H Mar, J Apr, K May, M Jun, N Jul, Q Aug, U Sep, V Oct, X Nov, Z Dec
+#   Use the full-size GC code even if you trade /MGC: the signal is the same, alerts show both.
 symbol = "auto"
 product = "GC"
 interval = "15m"
@@ -43,7 +48,7 @@ skip_bars = "745"     # signal bar right after 7:30 CT data releases: 1 win in 1
 [[watch]]
 name = "gold-asia"
 strategy = "metals_confluence"
-symbol = "auto"
+symbol = "auto"                         # or e.g. "/GCG27", same as the gold watch
 product = "GC"
 interval = "15m"
 enabled = true

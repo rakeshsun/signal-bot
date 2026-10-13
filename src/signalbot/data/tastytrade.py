@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -53,6 +54,10 @@ async def resolve(session: Session, symbol: str, product: str = "") -> Instrumen
         f = active[0]
         return Instrument(f.symbol, f.streamer_symbol, f.expiration_date)
     if symbol.startswith("/"):
+        # accept Robinhood/TradingView style years too: /GCG27 or /GCG2027 -> /GCG7 (tastytrade style)
+        m = re.fullmatch(r"(/[A-Z0-9]+?[FGHJKMNQUVXZ])(\d{1,4})", symbol.strip().upper())
+        if m:
+            symbol = m.group(1) + m.group(2)[-1]
         f = await Future.get(session, symbol)
         return Instrument(f.symbol, f.streamer_symbol, f.expiration_date)
     return Instrument(symbol.upper(), symbol.upper())
