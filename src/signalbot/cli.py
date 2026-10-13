@@ -149,6 +149,7 @@ def main() -> None:
     b.add_argument("--days", type=int, default=120)
     b.add_argument("--csv", type=Path, help="bars from a CSV file instead of tastytrade")
     b.add_argument("--compare", type=Path, help="TradingView trade-list CSV to check parity against")
+    b.add_argument("--symbol", help="test another contract, e.g. /GCQ6 (default: the watch's symbol)")
     b.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                    help="override a strategy param for this backtest, e.g. --set session_end=830 (repeatable)")
     sub.add_parser("strategies", help="list available strategies and their params")
@@ -180,6 +181,10 @@ def main() -> None:
     elif a.cmd == "check":
         asyncio.run(cmd_check(s, a.watch))
     elif a.cmd == "backtest":
+        if a.symbol:
+            import dataclasses
+
+            s.watches = [dataclasses.replace(w, symbol=a.symbol) if w.name == a.watch else w for w in s.watches]
         asyncio.run(cmd_backtest(s, a.watch, a.days, a.compare, a.csv, a.set))
     elif a.cmd == "test-notify":
         Notifier(s.notify).send("Signal bot test", "If you can read this on your phone, alerts are set up.")

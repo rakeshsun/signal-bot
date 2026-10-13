@@ -131,8 +131,10 @@ async def fetch_history(session: Session, inst: Instrument, interval: str, days:
             except TimeoutError:
                 break  # quiet for a while: the snapshot is complete
             book.apply(c)
-            if (c.snapshot_end or c.snapshot_snip) and not c.pending:
-                quiet_secs = 1.0  # drain what's queued, then stop
+            # only a true end-of-snapshot shortens the wait; after a "snip" more history can
+            # still be on its way in later batches
+            if c.snapshot_end and not c.snapshot_snip and not c.pending:
+                quiet_secs = 2.0  # drain what's queued, then stop
     bars = book.closed_bars()
     log.info("history: %d closed %s bars for %s", len(bars), interval, inst.symbol)
     return bars
