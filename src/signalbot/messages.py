@@ -46,10 +46,13 @@ def entry(t: Trade, w: Watch, symbol: str, res: Result, bar_ms: int) -> tuple[st
     side = "BUY" if t.direction > 0 else "SELL"
     below, above = ("below", "above") if t.direction > 0 else ("above", "below")
     closed_at = datetime.fromtimestamp((t.signal_time + bar_ms) / 1000, tz=CHICAGO).strftime("%I:%M %p CT")
+    extra = " · ".join(f"{v}" for v in t.info.values())
+    levels = f"{side} {_px(t.signal_close)} | SL {_px(t.stop)} | TP {_px(t.target)}"
     lines = [
+        levels,
+        *([f"Setup: {extra}"] if extra else []),
         f"Signal on the bar that closed {closed_at}, close {_px(t.signal_close)}",
         f"FROM YOUR FILL: stop {t.risk:.2f} pts {below}, target {t.reward:.2f} pts {above}",
-        f"(levels from signal close: SL {_px(t.stop)} · TP {_px(t.target)})",
         *_money_lines(w, t.risk, t.reward, symbol),
     ]
     wins, n = res.win_rate(t.direction)
@@ -58,9 +61,9 @@ def entry(t: Trade, w: Watch, symbol: str, res: Result, bar_ms: int) -> tuple[st
     names = " or ".join(contract_names(w, symbol)) or symbol
     lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, then right away place a stop "
                  f"{t.risk:.2f} pts {below} and a limit {t.reward:.2f} pts {above} your fill price. Signal only, not advice.")
-    extra = " · ".join(f"{v}" for v in t.info.values())
     tag = "PAPER " if w.paper else ""
-    return f"{tag}{side} {symbol} — {w.name}{(' ' + extra) if extra else ''}", "\n".join(lines)
+    # the title shows in bold on the phone / Mac banner: lead with the numbers you need to place the order
+    return f"{tag}{levels} | {symbol} {w.name}", "\n".join(lines)
 
 
 def exit_(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
