@@ -185,15 +185,24 @@ class BosPullback(Strategy):
             return []
         _, active = self._run(bars)
         p = self.p
-        rows: list[ChecklistRow] = [("Session", f"{p.session_start:04d}-{p.session_end:04d} CT", None)]
+        now = bars[-1].close
+        mins = int((bars[-1].time - bars[-2].time) / 60000) if len(bars) > 1 else 3
+        rows: list[ChecklistRow] = []
         if not active:
-            rows.append(("Setups", "none - waiting for a break of a swing high / low", None))
-        for s in active[-3:]:
-            side = "Bull" if s.d == 1 else "Bear"
+            rows.append(("Status", "No setup. Waiting for gold to break a recent high (buy) or low (sell).", None))
+        for s in active[-2:]:
+            buy = s.d == 1
+            kind = "BUY setup" if buy else "SELL setup"
+            cancel = s.ref - p.invalid_ticks * p.tick if buy else s.ref + p.invalid_ticks * p.tick
             if s.stage == 1:
-                need = f"retest {s.ref:,.1f} after {max(0, p.min_clean - s.clean)} more clean bars" if s.clean < p.min_clean else f"retest {s.ref:,.1f}"
-                rows.append((f"{side}: broke {s.ref:,.1f}", f"needs {need}", None))
+                wait = max(0, p.min_clean - s.clean)
+                when = f" (not in the next {wait * mins} min)" if wait else ""
+                rows.append((f"{kind}: step 1 of 2",
+                             f"Gold broke {'above' if buy else 'below'} {s.ref:,.1f}. Now {now:,.1f}. "
+                             f"Waiting for it to come back to {s.ref:,.1f}{when}.", None))
             else:
-                word = "above" if s.d == 1 else "below"
-                rows.append((f"{side}: retested {s.ref:,.1f}", f"ready - BOS on a close {word} {s.ext:,.1f}", True))
+                rows.append((f"{kind}: step 2 of 2",
+                             f"Pulled back to {s.ref:,.1f}. {'BUY' if buy else 'SELL'} if a {mins}-min bar closes "
+                             f"{'above' if buy else 'below'} {s.ext:,.1f}. Now {now:,.1f}.", True))
+            rows.append(("Cancelled if", f"a bar closes {'below' if buy else 'above'} {cancel:,.1f}", None))
         return rows
