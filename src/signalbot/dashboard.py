@@ -330,7 +330,7 @@ details summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .cklist li.hd{color:var(--soft);font-size:12px}
 .cklist .y::before{content:"✔";color:var(--up)}.cklist .n::before{content:"·";color:var(--soft);font-weight:700}
 .kv{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0;margin:0}
-.plain .kv{gap:16px;align-items:baseline}.plain .kv span{flex:0 0 auto;color:var(--soft)}.plain .kv b{text-align:right;font-weight:600}.plain .kv.go b{color:var(--up)}.plain{margin-bottom:10px}details.more>summary{cursor:pointer;color:var(--soft);font-size:13px;margin:6px 0}
+.plain .kv{display:block;padding:8px 0}.plain .kv span{display:block;color:var(--soft);font-size:13px;margin-bottom:2px}.plain .kv b{display:block;text-align:left;font-weight:600;line-height:1.4}.plain .kv.go b{color:var(--up)}.plain{margin-bottom:10px}details.more>summary{cursor:pointer;color:var(--soft);font-size:13px;margin:6px 0}
 .trades{margin-top:22px;border-top:1px solid var(--line);padding-top:16px}
 .tsum{display:flex;flex-wrap:wrap;gap:8px 28px;margin-bottom:10px}
 .tsum div{display:flex;flex-direction:column}.tsum b{font:600 22px/1.1 "Archivo",sans-serif;font-stretch:112%}.tsum span{font-size:12px;color:var(--soft)}
