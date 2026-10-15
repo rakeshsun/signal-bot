@@ -79,3 +79,22 @@ def test_dashboard_renders(tmp_path):
     dashboard.write(out, [lv], {}, alerts, time.time() - 3600, True)
     html = out.read_text()
     assert "Signal" in html and "BUY /GCZ6" in html and "Next step" in html and "Recent trades" in html
+
+
+def test_high_impact_news_info_is_separate_from_blocking_days():
+    from datetime import date as _d
+
+    from signalbot import messages, news
+
+    events = [
+        {"country": "USD", "impact": "High", "title": "PPI m/m", "date": "2026-10-15T08:30:00-04:00"},
+        {"country": "USD", "impact": "High", "title": "Retail Sales m/m", "date": "2026-10-15T08:30:00-04:00"},
+        {"country": "USD", "impact": "High", "title": "Fed Chairman Speaks", "date": "2026-10-15T23:30:00-04:00"},
+        {"country": "USD", "impact": "Medium", "title": "Empire State", "date": "2026-10-15T08:30:00-04:00"},
+        {"country": "EUR", "impact": "High", "title": "ECB", "date": "2026-10-15T08:30:00-04:00"},
+    ]
+    assert news.parse_ff(events) == {}  # PPI / retail sales don't block entries
+    info = news.parse_ff_info(events)
+    assert info == {_d(2026, 10, 15): [("7:30 AM", "PPI m/m"), ("7:30 AM", "Retail Sales m/m"), ("10:30 PM", "Fed Chairman Speaks")]}
+    title, body = messages.news_info(info[_d(2026, 10, 15)])
+    assert "not blocked" in title and "7:30 AM CT  PPI m/m" in body

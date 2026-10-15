@@ -86,6 +86,13 @@ def news(name: str) -> tuple[str, str]:
     return f"NEWS DAY: {name} at 7:30 CT", "Gold: no entries 7:00–8:00 CT. Signals resume after 8:00 CT."
 
 
+def news_info(items: list[tuple[str, str]]) -> tuple[str, str]:
+    """Heads-up for other high-impact US releases (PPI, retail sales, Fed speakers...). Not blocked."""
+    lines = [f"{t} CT  {name}" for t, name in items]
+    return ("HIGH-IMPACT NEWS TODAY (not blocked)",
+            "\n".join(lines) + "\nGold can spike at these times. Signals still fire; consider skipping one that lands right on a release.")
+
+
 def _cell(v) -> str:
     if v is True:
         return "✔"

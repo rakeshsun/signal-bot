@@ -368,7 +368,8 @@ h2,h3,h4{margin:0}
 .ri-sub{font-size:12px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ri.on .ri-dot{background:var(--gold);box-shadow:0 0 0 3px var(--gold-2)}.ri.long .ri-dot{background:var(--up)}.ri.short .ri-dot{background:var(--down)}.ri.exit .ri-dot{background:var(--soft)}
 .ri.on .ri-sub{color:var(--gold-ink)}
-.rn{margin:0;padding:3px 10px;font-size:13px;color:var(--soft)}.rn b{color:var(--ink);font-weight:600}.rn.hot{color:var(--ink);background:color-mix(in srgb,var(--news) 16%,transparent);border-radius:8px;padding:8px 10px}
+.rn{margin:0;padding:3px 10px;font-size:13px;color:var(--soft)}.rn b{color:var(--ink);font-weight:600}.rn-t{color:var(--gold-ink);font-weight:600}.rn.warn{color:var(--ink);background:color-mix(in srgb,var(--down) 12%,transparent);border-radius:8px;padding:8px 10px}
+.rn.hot{color:var(--ink);background:color-mix(in srgb,var(--news) 16%,transparent);border-radius:8px;padding:8px 10px}
 
 /* hero */
 .main{min-width:0;display:flex;flex-direction:column;gap:14px}
@@ -595,7 +596,7 @@ def _action(lv) -> str:
     return f'<span class="chip{" on" if inwin else ""}"><b>{E(lv.watch.name.title())}</b> {sub}</span>'
 
 
-def _rail(lives, now_ct, upcoming, news_today) -> str:
+def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     items = []
     for lv in lives:
         slug = "w-" + "".join(c if c.isalnum() else "-" for c in lv.watch.name.lower())
@@ -608,8 +609,22 @@ def _rail(lives, now_ct, upcoming, news_today) -> str:
         news = "".join(f'<p class="rn"><b>{E(n)}</b> {d:%a %b %-d}</p>' for d, n in upcoming[:3])
     else:
         news = '<p class="rn muted">None scheduled</p>'
+    other = ""
+    blocked = {news_today} if news_today else set()
+    for d in sorted(k for k in (info or {}) if k >= now_ct.date())[:3]:
+        evs = [(t, n) for t, n in info[d] if not any(b and b.split()[0].lower() in n.lower() for b in blocked)]
+        if not evs:
+            continue
+        when = "Today" if d == now_ct.date() else ("Tomorrow" if (d - now_ct.date()).days == 1 else f"{d:%a %b %-d}")
+        by_time: dict = {}
+        for t, n in evs:
+            by_time.setdefault(t, []).append(n)
+        lines = "".join(f'<span class="rn-t">{E(t)}</span> {E(", ".join(ns))}<br>' for t, ns in by_time.items())
+        other += f'<p class="rn{" warn" if d == now_ct.date() else ""}"><b>{when}</b><br>{lines}</p>'
+    other_html = (f'<h2 class="rail-h2">Other big news</h2>{other}<p class="rn muted small">Not blocked: signals still fire. Gold can spike at these times.</p>'
+                  if other else "")
     return (f'<nav class="rail" aria-label="Strategies"><h2>Strategies</h2>{"".join(items)}'
-            f'<h2 class="rail-h2">News days</h2>{news}<p class="rn muted small">Gold skips 7:00–8:00 CT on these mornings.</p></nav>')
+            f'<h2 class="rail-h2">News days</h2>{news}<p class="rn muted small">Gold skips 7:00–8:00 CT on these mornings.</p>{other_html}</nav>')
 
 
 def _ticker(lives) -> str:
@@ -647,7 +662,7 @@ def _hero(lives, acts) -> str:
             f'<p class="h-sub">{"; ".join(parts) or "No strategies running."}. You will get a phone alert the moment a signal fires.</p></section>')
 
 
-def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool) -> str:
+def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool, info=None) -> str:
     now_ct = datetime.now(CHICAGO)
     today = now_ct.date()
     past_news = now_ct.hour >= 8  # today's 7:30 release and the 7:00-8:00 block are over
@@ -676,7 +691,7 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 <button id="theme" type="button" aria-label="Switch light or dark theme">Theme</button></p>
 </div></header>
 <div class="shell">
-{_rail(lives, now_ct, upcoming, news_today)}
+{_rail(lives, now_ct, upcoming, news_today, info or {})}
 <main class="main">
 {_hero(lives, acts)}
 {watches}
@@ -697,8 +712,8 @@ setTimeout(function(){{try{{sessionStorage.setItem('sd:y',String(window.scrollY)
 </script></body></html>"""
 
 
-def write(path: Path, lives, nd, alerts, started, mkt_open) -> None:
+def write(path: Path, lives, nd, alerts, started, mkt_open, info=None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(render(lives, nd, alerts, started, mkt_open), encoding="utf-8")
+    tmp.write_text(render(lives, nd, alerts, started, mkt_open, info), encoding="utf-8")
     os.replace(tmp, path)

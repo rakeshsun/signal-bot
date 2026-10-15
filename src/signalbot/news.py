@@ -53,12 +53,33 @@ def parse_ff(events: list[dict]) -> dict[date, str]:
     return out
 
 
-def fetch_ff(timeout: float = 15.0) -> dict[date, str]:
-    """This week's CPI / jobs dates from ForexFactory; empty on any error (never blocks trading)."""
+def parse_ff_info(events: list[dict]) -> dict[date, list[tuple[str, str]]]:
+    """Every high-impact USD event (any title, any time) as {day: [("7:30 AM", "PPI m/m"), ...]}.
+    Information only: these do NOT block entries (only CPI / jobs do, see parse_ff)."""
+    out: dict[date, list[tuple[str, str]]] = {}
+    for e in events:
+        if e.get("country") != "USD" or e.get("impact") != "High":
+            continue
+        try:
+            when = datetime.fromisoformat(str(e["date"])).astimezone(CHICAGO)
+        except (KeyError, ValueError):
+            continue
+        clock = when.strftime("%I:%M %p").lstrip("0")
+        out.setdefault(when.date(), []).append((clock, str(e.get("title", "")).strip()))
+    return out
+
+
+def fetch_ff_events(timeout: float = 15.0) -> list[dict]:
+    """This week's ForexFactory calendar; empty on any error (never blocks trading)."""
     try:
         req = urllib.request.Request(FF_URL, headers={"User-Agent": "signal-bot/0.2"})
         with urlopen(req, timeout=timeout) as r:
-            return parse_ff(json.load(r))
+            return json.load(r)
     except Exception as exc:  # the feed is rate-limited and occasionally down
         log.warning("news calendar fetch failed: %s", exc)
-        return {}
+        return []
+
+
+def fetch_ff(timeout: float = 15.0) -> dict[date, str]:
+    """This week's CPI / jobs dates from ForexFactory; empty on any error (never blocks trading)."""
+    return parse_ff(fetch_ff_events(timeout))

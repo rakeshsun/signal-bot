@@ -54,11 +54,20 @@ class SentLog:
 
 
 def news_days(s: Settings, fetch: bool) -> dict[date, str]:
+    return news_calendar(s, fetch)[0]
+
+
+def news_calendar(s: Settings, fetch: bool):
+    """(blocking news days {day: "CPI"/"Jobs report"}, info {day: [(time, title)]} for every
+    high-impact US release this week). One feed download for both."""
     days = news.from_config(s.news_days)
+    info: dict = {}
     if fetch and s.fetch_news_calendar:
-        for d, name in news.fetch_ff().items():
+        events = news.fetch_ff_events()
+        for d, name in news.parse_ff(events).items():
             days.setdefault(d, name)
-    return days
+        info = news.parse_ff_info(events)
+    return days, info
 
 
 def evaluate(strategy: Strategy, bars, ctx: Context) -> Result:
@@ -182,7 +191,7 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         raise SystemExit("No enabled [[watch]] in config.toml")
     alerts = Alerts(notifier, sent, s.state_dir / "alerts.jsonl")
     session = tt.make_session()
-    nd = await asyncio.to_thread(news_days, s, True)
+    nd, info = await asyncio.to_thread(news_calendar, s, True)
     nd_on = datetime.now(CHICAGO).date()
 
     lives = [await _start_watch(s, session, w) for w in watches]
@@ -193,14 +202,14 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd)))
         for lv in lives))
     if dashboard_path is not None:
-        dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open())
+        dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info)
         log.info("dashboard: %s", dashboard_path)
 
     async def dash_loop() -> None:  # live price + live checks on the page every 10 s
         while dashboard_path is not None:
             await asyncio.sleep(10)
             try:
-                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open())
+                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info)
             except Exception as exc:
                 log.debug("dashboard update failed: %s", exc)
 
@@ -220,7 +229,7 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
 
             # once a day: refresh the news calendar and follow futures contract rolls ("auto")
             if today != nd_on:
-                nd, nd_on = await asyncio.to_thread(news_days, s, True), today
+                (nd, info), nd_on = await asyncio.to_thread(news_calendar, s, True), today
                 for i, lv in enumerate(lives):
                     if lv.watch.symbol.lower() != "auto":
                         continue
@@ -241,6 +250,9 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
             # news heads-up at 7:00 CT
             if 700 <= now_hm < 730 and today in nd and any(lv.watch.news_alert for lv in lives):
                 await alerts.send(f"news|{today}", *messages.news(nd[today]), kind="news")
+            # heads-up for the other high-impact US releases today (PPI, retail sales, Fed...): not blocked
+            if 700 <= now_hm < 730 and info.get(today) and any(lv.watch.news_alert for lv in lives):
+                await alerts.send(f"newsinfo|{today}", *messages.news_info(info[today]), kind="news")
 
             # new closed bars -> strategy -> alerts
             for lv in lives:
@@ -302,7 +314,7 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
 
             if dashboard_path is not None:
                 try:
-                    dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(now_ct))
+                    dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(now_ct), info)
                 except Exception as exc:
                     log.warning("dashboard update failed: %s", exc)
     finally:
