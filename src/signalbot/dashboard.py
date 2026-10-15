@@ -63,8 +63,14 @@ def _ladder(t, last_close: float) -> str:
 
     zone_good = (min(entry, t.target), max(entry, t.target))
     zone_bad = (min(entry, t.stop), max(entry, t.stop))
+    # label positions, pushed apart (top to bottom) so close prices never print on top of each other
+    pos, last = {}, None
+    for k, v in sorted(pts.items(), key=lambda kv: y(kv[1])):
+        top = y(v) if last is None else max(y(v), last + 11)
+        pos[k] = last = top
+    over = max(0.0, last - 96)  # shift the stack up if it ran off the bottom
     rows = "".join(
-        f'<div class="lv lv-{k.lower()}" style="top:{y(v):.1f}%"><span class="lv-k">{k}</span><span class="lv-v">{_px(v)}</span></div>'
+        f'<div class="lv lv-{k.lower()}" style="top:{pos[k] - over:.1f}%"><span class="lv-k">{k}</span><span class="lv-v">{_px(v)}</span></div>'
         for k, v in pts.items()
     )
     return f"""<div class="ladder" role="img" aria-label="Stop {_px(t.stop)}, entry {_px(entry)}, now {_px(last_close)}, target {_px(t.target)}">
