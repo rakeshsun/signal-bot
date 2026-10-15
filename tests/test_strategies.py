@@ -128,3 +128,18 @@ def test_vwap_fade_no_lookahead_and_direction():
         if s:  # fades: short only on a red bar, long only on a green bar
             assert (b.close < b.open) if s.direction < 0 else (b.close > b.open)
             assert (b.close - s.stop) * s.direction > 0 and (s.target - b.close) * s.direction > 0
+
+
+def test_bos_pullback_no_lookahead_and_sane_levels():
+    cls = strategies.get("bos_pullback")
+    c, v = random_walk(seed=11)
+    bars = make_bars(c, vol=v)
+    p = cls.make_params({"session_start": 0, "session_end": 2359})
+    full = cls(p).signals(bars, Context())
+    cut = cls(p).signals(bars[:2000], Context())
+    assert [(s.direction, s.stop) if s else None for s in full[:2000]] == [(s.direction, s.stop) if s else None for s in cut]
+    assert any(full)
+    for s, b in zip(full, bars):
+        if s:
+            assert (b.close - s.stop) * s.direction > 0 and (s.target - b.close) * s.direction > 0
+    assert cls(p).checklist(bars, Context())

@@ -1,0 +1,199 @@
+"""Valid BOS Pullback - break of structure, retest of the broken level, then a break of the new extreme.
+
+Structure logic ported from LuxAlgo's "Valid BOS Pullback" TradingView indicator
+(Mozilla Public License 2.0, https://mozilla.org/MPL/2.0/), so this file is MPL-2.0 too.
+Trade rules (entry / stop / target / session) are ours - the indicator itself only marks the BOS.
+
+Bullish (bearish is the mirror image):
+  1. The reference is the HIGHEST confirmed swing high inside ``lookback`` bars (not yet used).
+  2. Initial break: a bar closes above it by ``min_break_ticks`` (previous close was not above).
+  3. The new high keeps extending; it counts once it has held for ``swing`` bars.
+  4. After ``min_clean`` bars that do NOT touch the old level, a bar whose range crosses the old
+     level is the valid pullback (retest).
+  5. BOS: a later bar closes above the new high -> BUY signal on that close.
+  Invalid: a close more than ``invalid_ticks`` back through the old level, or older than ``max_wait``.
+  A fresh break the other way cancels the pending setups of the old direction.
+Trade: stop just beyond the pullback extreme (lowest low since the retest), target = rr x risk.
+
+1-year GC test (3-minute bars, Asia 18:00-02:00 CT, costs included): 151 trades, 48% wins,
+profit factor 1.88 (first half 1.96, second half 1.74).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..bars import Bar, hhmm
+from ..engine import Signal
+from . import register
+from .base import ChecklistRow, Context, Strategy
+
+
+@dataclass
+class _Setup:
+    d: int  # 1 bull, -1 bear
+    stage: int  # 1 waiting for retest, 2 retested - waiting for the break of the new extreme
+    start: int
+    ref: float  # the old swing level that must be retested
+    ext: float  # the new extreme that must be broken
+    ext_bar: int | None = None
+    held: bool = False
+    clean: int = 0
+    pull: float = float("nan")  # pullback extreme since the retest (stop goes beyond it)
+
+
+def _pivots(h: list[float], lo: list[float], left: int, right: int):
+    """Pivot value known at bar i (confirmed ``right`` bars after it printed), like ta.pivothigh."""
+    n = len(h)
+    ph: list[float | None] = [None] * n
+    pl: list[float | None] = [None] * n
+    for i in range(left + right, n):
+        j = i - right
+        c = h[j]
+        if all(h[k] < c for k in range(j - left, j)) and all(h[k] <= c for k in range(j + 1, i + 1)):
+            ph[i] = c
+        c = lo[j]
+        if all(lo[k] > c for k in range(j - left, j)) and all(lo[k] >= c for k in range(j + 1, i + 1)):
+            pl[i] = c
+    return ph, pl
+
+
+@register
+class BosPullback(Strategy):
+    name = "bos_pullback"
+    description = "Break of structure -> retest of the broken level -> break of the new extreme (LuxAlgo logic)"
+
+    @dataclass
+    class Params:
+        swing: int = 2  # swing left = right bars
+        lookback: int = 24  # bars to look back for the dominant swing high / low
+        invalid_ticks: int = 20  # close this far back through the old level kills the setup
+        min_clean: int = 3  # bars without touching the old level before a retest counts
+        min_break_ticks: int = 1
+        max_wait: int = 120  # bars
+        tick: float = 0.1  # GC / MGC tick size
+        rr: float = 2.0
+        stop_pad: float = 0.5  # points beyond the pullback extreme
+        session_start: int = 1800
+        session_end: int = 200
+        do_long: bool = True
+        do_short: bool = True
+        skip_bars: str = ""
+
+    def _in_session(self, t: int) -> bool:
+        a, b = self.p.session_start, self.p.session_end
+        return (a <= t < b) if a <= b else (t >= a or t < b)
+
+    def _run(self, bars: list[Bar]):
+        """Returns (events per bar, active setups at the end). event = (dir, pull, ext) on a BOS bar."""
+        p = self.p
+        n = len(bars)
+        h = [b.high for b in bars]
+        lo = [b.low for b in bars]
+        c = [b.close for b in bars]
+        ph, pl = _pivots(h, lo, p.swing, p.swing)
+        allow, minext = p.invalid_ticks * p.tick, p.min_break_ticks * p.tick
+        active: list[_Setup] = []
+        hv: list[tuple[float, int]] = []
+        lv: list[tuple[float, int]] = []
+        ret_hi: list[tuple[float, int]] = []
+        ret_lo: list[tuple[float, int]] = []
+        events: list[tuple[int, float, float] | None] = [None] * n
+        for i in range(n):
+            if ph[i] is not None:
+                hv.append((ph[i], i - p.swing))
+            if pl[i] is not None:
+                lv.append((pl[i], i - p.swing))
+            hv = [x for x in hv if i - x[1] <= p.lookback]
+            lv = [x for x in lv if i - x[1] <= p.lookback]
+            ret_hi = [x for x in ret_hi if i - x[1] <= p.lookback + p.swing]
+            ret_lo = [x for x in ret_lo if i - x[1] <= p.lookback + p.swing]
+            bull = bear = False
+            for s in list(reversed(active)):
+                invalid = i - s.start > p.max_wait or (c[i] < s.ref - allow if s.d == 1 else c[i] > s.ref + allow)
+                done = False
+                if not invalid:
+                    if s.stage == 1:
+                        if s.ext_bar is None:
+                            s.ext_bar = s.start
+                        if (s.d == 1 and h[i] > s.ext) or (s.d == -1 and lo[i] < s.ext):
+                            s.ext, s.ext_bar, s.held = (h[i] if s.d == 1 else lo[i]), i, False
+                        if i - s.ext_bar >= p.swing:
+                            s.held = True
+                        touched = lo[i] <= s.ref <= h[i]
+                        if touched and s.held and s.clean >= p.min_clean:
+                            s.stage, s.pull = 2, (lo[i] if s.d == 1 else h[i])
+                        s.clean = 0 if touched else s.clean + 1
+                    else:
+                        s.pull = min(s.pull, lo[i]) if s.d == 1 else max(s.pull, h[i])
+                        if (s.d == 1 and c[i] > s.ext) or (s.d == -1 and c[i] < s.ext):
+                            done = True
+                            bull, bear = bull or s.d == 1, bear or s.d == -1
+                if invalid:
+                    active.remove(s)
+                elif done:
+                    (ret_hi if s.d == 1 else ret_lo).append((s.ext, i))
+                    events[i] = (s.d, s.pull, s.ext)
+                    active.remove(s)
+            rh = {x[0] for x in ret_hi}
+            rl = {x[0] for x in ret_lo}
+            active = [s for s in active if not ((s.d == 1 and s.ref in rh) or (s.d == -1 and s.ref in rl))]
+            prev_hi = max(((v, b) for v, b in hv if v not in rh), default=None)
+            prev_lo = min(((v, b) for v, b in lv if v not in rl), default=None)
+            new_bull = (not bull and prev_hi is not None and i > prev_hi[1] and i > 0
+                        and c[i] > prev_hi[0] + minext and c[i - 1] <= prev_hi[0])
+            new_bear = (not bear and prev_lo is not None and i > prev_lo[1] and i > 0
+                        and c[i] < prev_lo[0] - minext and c[i - 1] >= prev_lo[0])
+            for s in active:
+                if s.stage == 2 and s.d == 1 and prev_hi and abs(prev_hi[0] - s.ext) <= p.tick:
+                    new_bull = False
+                if s.stage == 2 and s.d == -1 and prev_lo and abs(prev_lo[0] - s.ext) <= p.tick:
+                    new_bear = False
+            if new_bull or new_bear:
+                active = [s for s in active if not ((new_bull and s.d == -1) or (new_bear and s.d == 1))]
+            if new_bull:
+                active.append(_Setup(1, 1, i, prev_hi[0], h[i]))
+            if new_bear:
+                active.append(_Setup(-1, 1, i, prev_lo[0], lo[i]))
+        return events, active
+
+    def signals(self, bars: list[Bar], ctx: Context) -> list[Signal | None]:
+        p = self.p
+        out: list[Signal | None] = [None] * len(bars)
+        if len(bars) < 4 * p.swing + 5:
+            return out
+        events, _ = self._run(bars)
+        skip = {int(x) for x in str(p.skip_bars).replace(" ", "").split(",") if x}
+        for i, ev in enumerate(events):
+            if ev is None:
+                continue
+            d, pull, ext = ev
+            t = hhmm(bars[i].time)
+            if not self._in_session(t) or t in skip or (d == 1 and not p.do_long) or (d == -1 and not p.do_short):
+                continue
+            close = bars[i].close
+            stop = pull - d * p.stop_pad
+            risk = (close - stop) * d
+            if risk <= 0:
+                continue
+            out[i] = Signal(d, stop=stop, target=close + d * p.rr * risk,
+                            info={"setup": f"BOS {'up' if d > 0 else 'down'} after retest, pullback {pull:,.1f}"})
+        return out
+
+    def checklist(self, bars: list[Bar], ctx: Context) -> list[ChecklistRow]:
+        if len(bars) < 4 * self.p.swing + 5:
+            return []
+        _, active = self._run(bars)
+        p = self.p
+        rows: list[ChecklistRow] = [("Session", f"{p.session_start:04d}-{p.session_end:04d} CT", None)]
+        if not active:
+            rows.append(("Setups", "none - waiting for a break of a swing high / low", None))
+        for s in active[-3:]:
+            side = "Bull" if s.d == 1 else "Bear"
+            if s.stage == 1:
+                need = f"retest {s.ref:,.1f} after {max(0, p.min_clean - s.clean)} more clean bars" if s.clean < p.min_clean else f"retest {s.ref:,.1f}"
+                rows.append((f"{side}: broke {s.ref:,.1f}", f"needs {need}", None))
+            else:
+                word = "above" if s.d == 1 else "below"
+                rows.append((f"{side}: retested {s.ref:,.1f}", f"ready - BOS on a close {word} {s.ext:,.1f}", True))
+        return rows
