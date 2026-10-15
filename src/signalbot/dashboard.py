@@ -249,7 +249,8 @@ def _trades(lv) -> str:
 
     recent = list(reversed(res.trades[-12:]))
     head = '<thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th></tr></thead>'
-    more = (f'<details class="more"><summary>Show {len(recent) - 4} older trade{'s' if len(recent) > 5 else ''}</summary><table class="tt">{head}<tbody>'
+    plural = "trades" if len(recent) > 5 else "trade"
+    more = (f'<details class="more"><summary>Show {len(recent) - 4} older {plural}</summary><table class="tt">{head}<tbody>'
             + "".join(row(t) for t in recent[4:]) + '</tbody></table></details>') if len(recent) > 4 else ""
     return f"""<h3>Last {days} days</h3>{summary}
 <table class="tt">{head}<tbody>{"".join(row(t) for t in recent[:4])}</tbody></table>{more}"""
