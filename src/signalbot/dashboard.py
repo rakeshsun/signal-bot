@@ -458,9 +458,11 @@ def _action(lv) -> str:
 
 
 def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool) -> str:
-    today = datetime.now(CHICAGO).date()
-    upcoming = sorted((d, n) for d, n in nd.items() if d >= today)[:5]
-    news_today = nd.get(today)
+    now_ct = datetime.now(CHICAGO)
+    today = now_ct.date()
+    past_news = now_ct.hour >= 8  # today's 7:30 release and the 7:00-8:00 block are over
+    upcoming = sorted((d, n) for d, n in nd.items() if d > today or (d == today and not past_news))[:5]
+    news_today = None if past_news else nd.get(today)
     if news_today:
         newsbar = f'<p class="newsbar"><b>{E(news_today)} today at 7:30 CT.</b> Gold takes no new entries from 7:00 to 8:00.</p>'
     elif upcoming:
