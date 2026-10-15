@@ -168,6 +168,13 @@ def _checks(lv, nd) -> str:
     other = [r for r in rows if r not in brows and not str(r[0]).startswith("Checks passed")]
     out = []
     _, live_bar = _live(lv)
+    plain = lv.strategy.summary(closed, ctx, live_bar)
+    if plain:
+        out.append('<div class="plain">' + "".join(
+            f'<p class="kv{" go" if hot else ""}"><span>{E(lab)}</span><b>{E(txt)}</b></p>' for lab, txt, hot in plain) + '</div>')
+        other = []
+        if brows:
+            out.append('<details class="more"><summary>Show the details</summary>')
     if brows:
         names = [str(r[0]) for r in brows]
         if live_bar is not None:
@@ -191,6 +198,8 @@ def _checks(lv, nd) -> str:
         wl, nl = lv.res.win_rate(1)
         ws, ns = lv.res.win_rate(-1)
         out.append(f'<p class="hist">When all 8 lined up recently: longs won <b>{wl}/{nl}</b>, shorts won <b>{ws}/{ns}</b>. Past results, not a forecast.</p>')
+        if plain:
+            out.append('</details>')
     for lab, lo, sh in other:
         v = lo if not isinstance(lo, bool) else ("yes" if lo else "no")
         out.append(f'<p class="kv"><span>{E(str(lab))}</span><b>{E(str(v))}</b></p>')
@@ -321,6 +330,7 @@ details summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .cklist li.hd{color:var(--soft);font-size:12px}
 .cklist .y::before{content:"✔";color:var(--up)}.cklist .n::before{content:"·";color:var(--soft);font-weight:700}
 .kv{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0;margin:0}
+.plain .kv{gap:16px;align-items:baseline}.plain .kv span{flex:0 0 auto;color:var(--soft)}.plain .kv b{text-align:right;font-weight:600}.plain .kv.go b{color:var(--up)}.plain{margin-bottom:10px}details.more>summary{cursor:pointer;color:var(--soft);font-size:13px;margin:6px 0}
 .trades{margin-top:22px;border-top:1px solid var(--line);padding-top:16px}
 .tsum{display:flex;flex-wrap:wrap;gap:8px 28px;margin-bottom:10px}
 .tsum div{display:flex;flex-direction:column}.tsum b{font:600 22px/1.1 "Archivo",sans-serif;font-stretch:112%}.tsum span{font-size:12px;color:var(--soft)}

@@ -15,7 +15,7 @@ from .. import indicators as ta
 from ..bars import Bar, day, hhmm
 from ..engine import Signal
 from . import register
-from .base import ChecklistRow, Context, Strategy
+from .base import ChecklistRow, Context, Strategy, clock, in_window, now_hhmm
 
 NAMES = (
     "EMA 20/50 stack",
@@ -148,3 +148,45 @@ class MetalsConfluence(Strategy):
         rows: list[ChecklistRow] = [(n, lo, sh) for n, lo, sh in zip(NAMES, ck[0], ck[1])]
         rows.append(("Checks passed", f"{sum(ck[0])}/8", f"{sum(ck[1])}/8"))
         return rows
+
+
+PLAIN = ["short-term trend", "long-term trend", "trend strength", "RSI", "MACD", "pullback", "trigger candle", "volume"]
+
+
+def _metals_summary(self, bars, ctx, live=None):
+    from datetime import datetime
+
+    from ..bars import CHICAGO
+
+    p = self.p
+    win = f"{clock(p.session_start)}–{clock(p.session_end)} CT"
+    t = now_hhmm()
+    today = datetime.now(CHICAGO).date()
+    news = ctx.news_days.get(today)
+    if not in_window(t, p.session_start, p.session_end):
+        return [("What to do", f"Nothing. This strategy only trades {win}.", False)]
+    if news and p.news_mode == "skip_session":
+        return [("What to do", f"Nothing. {news} today: no trades this morning.", False)]
+    if news and p.news_mode == "skip_7_8" and 700 <= t < 800:
+        return [("What to do", f"Nothing. {news} today: no new trades until 8:00 AM CT.", False)]
+    checks, _ = self._checks(bars + ([live] if live is not None else []))
+    if not checks or checks[-1] is None:
+        return [("What to do", "Nothing yet. Loading history.", False)]
+    lo, sh = checks[-1]
+    nl, ns = sum(lo), sum(sh)
+
+    def miss(oks):
+        m = [n for n, ok in zip(PLAIN, oks) if not ok]
+        return "all pass" if not m else "missing " + ", ".join(m[:3]) + (f" +{len(m) - 3} more" if len(m) > 3 else "")
+
+    best, side = (nl, "BUY") if nl >= ns else (ns, "SELL")
+    rows = [("What to do", f"Get ready. A {side} alert may come when this 15-min bar closes." if best >= 7
+             else "Nothing yet. Just wait.", best >= 7)]
+    if p.do_long:
+        rows.append(("BUY alert comes if", f"all 8 checks pass at a 15-min close (now {nl}/8, {miss(lo)})", nl >= 7))
+    if p.do_short:
+        rows.append(("SELL alert comes if", f"all 8 checks pass at a 15-min close (now {ns}/8, {miss(sh)})", ns >= 7))
+    return rows
+
+
+MetalsConfluence.summary = _metals_summary

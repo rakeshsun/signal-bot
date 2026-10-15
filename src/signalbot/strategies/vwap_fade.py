@@ -18,7 +18,7 @@ from .. import indicators as ta
 from ..bars import CHICAGO, Bar, day, hhmm
 from ..engine import Signal
 from . import register
-from .base import ChecklistRow, Context, Strategy
+from .base import ChecklistRow, Context, Strategy, clock, in_window, now_hhmm
 
 
 def _cme_day(ts_ms: int) -> int:
@@ -111,3 +111,34 @@ class VwapFade(Strategy):
             ("Distance", f"{stretch:+.1f} ATR (needs ±{p.stretch_atr:g})", far),
             ("Fade zone", f"above {vw + p.stretch_atr * a:,.1f} / below {vw - p.stretch_atr * a:,.1f}", None),
         ]
+
+
+def _vwap_summary(self, bars, ctx, live=None):
+    p = self.p
+    if len(bars) < 30:
+        return []
+    win = f"{clock(p.session_start)}–{clock(p.session_end)} CT"
+    if not in_window(now_hhmm(), p.session_start, p.session_end):
+        return [("What to do", f"Nothing. This strategy only trades {win}.", False)]
+    h = [b.high for b in bars]
+    lo = [b.low for b in bars]
+    c = [b.close for b in bars]
+    a = ta.atr(h, lo, c, 14)[-1] or 0
+    vw = session_vwap(bars + ([live] if live is not None else []))[-1]
+    now = live.close if live is not None else c[-1]
+    up, dn = vw + p.stretch_atr * a, vw - p.stretch_atr * a
+    mins = int((bars[-1].time - bars[-2].time) / 60000)
+    if now >= up:
+        rows = [("What to do", f"Get ready. Gold is stretched high: a SELL alert comes if a {mins}-min bar closes red (down).", True)]
+    elif now <= dn:
+        rows = [("What to do", f"Get ready. Gold is stretched low: a BUY alert comes if a {mins}-min bar closes green (up).", True)]
+    else:
+        rows = [("What to do", "Nothing yet. Just wait.", False)]
+    if p.do_long:
+        rows.append(("BUY alert comes if", f"gold drops below {dn:,.1f}, then a {mins}-min bar closes green (gold is {now:,.1f} now)", now <= dn))
+    if p.do_short:
+        rows.append(("SELL alert comes if", f"gold rises above {up:,.1f}, then a {mins}-min bar closes red (gold is {now:,.1f} now)", now >= up))
+    return rows
+
+
+VwapFade.summary = _vwap_summary

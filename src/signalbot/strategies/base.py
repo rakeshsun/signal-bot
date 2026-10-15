@@ -49,6 +49,11 @@ class Strategy(ABC):
     def __init__(self, params: Any | None = None) -> None:
         self.p = params if params is not None else self.Params()
 
+    def summary(self, bars: list[Bar], ctx: Context, live: Bar | None = None) -> list[tuple[str, str, bool]]:
+        """Plain-language status for the dashboard: (label, text, highlight). ``bars`` are closed bars,
+        ``live`` the still-forming bar (or None). Default: nothing - the dashboard shows the checklist."""
+        return []
+
     @classmethod
     def make_params(cls, overrides: dict[str, Any]) -> Any:
         valid = set(cls.Params.__dataclass_fields__)
@@ -66,3 +71,22 @@ class Strategy(ABC):
     def checklist(self, bars: list[Bar], ctx: Context) -> list[ChecklistRow]:
         """Rows describing the latest bar, for status messages. Optional."""
         return []
+
+
+def clock(hhmm: int) -> str:
+    """720 -> '7:20 AM'."""
+    h, m = divmod(int(hhmm), 100)
+    return f"{(h % 12) or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
+def now_hhmm() -> int:
+    from datetime import datetime
+
+    from ..bars import CHICAGO
+
+    d = datetime.now(CHICAGO)
+    return d.hour * 100 + d.minute
+
+
+def in_window(t: int, start: int, end: int) -> bool:
+    return (start <= t < end) if start <= end else (t >= start or t < end)
