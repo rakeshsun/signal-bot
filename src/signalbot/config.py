@@ -36,6 +36,9 @@ class Settings:
     news_days: dict[str, str] = field(default_factory=dict)
     fetch_news_calendar: bool = True
     heartbeat_hhmm: int = 715  # weekday "bot is running" message, Chicago time; -1 = off
+    dashboard_port: int = 8765  # the bot serves the dashboard at http://localhost:<port>/ ; 0 = off
+    dashboard_lan: bool = False  # also reachable from your phone on the same Wi-Fi (needs ?k=<token>)
+    dashboard_token: str = ""  # phone access key; empty = generated once and saved in state_dir
     state_dir: Path = Path.home() / ".signalbot"
 
     def watch(self, name: str) -> Watch:
@@ -71,7 +74,7 @@ def load(config_path: Path) -> Settings:
     if not config_path.exists():
         raise FileNotFoundError(f"{config_path} not found - copy config.example.toml to config.toml")
     raw = tomllib.loads(config_path.read_text())
-    for key in ("history_days", "fetch_news_calendar", "heartbeat_hhmm"):
+    for key in ("history_days", "fetch_news_calendar", "heartbeat_hhmm", "dashboard_port", "dashboard_lan", "dashboard_token"):
         if key in raw:
             setattr(s, key, raw[key])
     if "state_dir" in raw:

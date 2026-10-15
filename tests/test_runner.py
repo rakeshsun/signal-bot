@@ -98,3 +98,67 @@ def test_high_impact_news_info_is_separate_from_blocking_days():
     assert info == {_d(2026, 10, 15): [("7:30 AM", "PPI m/m"), ("7:30 AM", "Retail Sales m/m"), ("10:30 PM", "Fed Chairman Speaks")]}
     title, body = messages.news_info(info[_d(2026, 10, 15)])
     assert "not blocked" in title and "7:30 AM CT  PPI m/m" in body
+
+
+def test_dashboard_has_chart_journal_and_today(tmp_path):
+    c, v = random_walk()
+    lv = _live(make_bars(c, vol=v))
+    asyncio.run(_baseline(lv, {}, SentLog(tmp_path / "s.json")))
+    html = dashboard.render([lv], {}, [], time.time(), True, None, 8765, ["http://localhost:8765/", "http://10.0.0.5:8765/?k=abc"])
+    assert '<figure class="chart">' in html and "<svg" in html
+    assert 'id="jr-body"' in html and 'id="trades-data"' in html and 'class="jr"' in html
+    assert 'class="today"' in html and 'id="sound"' in html
+    assert "10.0.0.5:8765/?k=abc" in html and "__PORT__" not in html and "__JS__" not in html
+    data = html.split('id="trades-data" type="application/json">')[1].split("</script>")[0]
+    rows = json.loads(data)
+    assert rows and {"k", "w", "t", "side", "usd"} <= set(rows[0])
+
+
+def test_dashboard_server_serves_page_and_journal(tmp_path):
+    import socket
+    import urllib.error
+    import urllib.request
+
+    from signalbot import server
+
+    page = tmp_path / "d.html"
+    page.write_text("<html>hello</html>")
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    urls = server.start(page, tmp_path, port, False, "")
+    assert urls == [f"http://localhost:{port}/"]
+    base = f"http://127.0.0.1:{port}"
+    assert b"hello" in urllib.request.urlopen(base + "/").read()
+    assert json.loads(urllib.request.urlopen(base + "/api/journal").read()) == {}
+
+    def post(body):
+        req = urllib.request.Request(base + "/api/journal", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        return json.loads(urllib.request.urlopen(req).read())
+
+    assert post({"key": "gold|1", "choice": "took"})["gold|1"]["choice"] == "took"
+    assert json.loads((tmp_path / "journal.json").read_text())["gold|1"]["choice"] == "took"
+    assert post({"key": "gold|1", "choice": ""}) == {}
+    try:
+        post({"key": "gold|1", "choice": "maybe"})
+        raise AssertionError("bad choice accepted")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+
+
+def test_dashboard_server_lan_needs_token(tmp_path):
+    from signalbot import server
+
+    tok = server.load_token(tmp_path)
+    assert tok and server.load_token(tmp_path) == tok  # saved once, reused
+    h = server.make_handler(tmp_path / "d.html", server.Journal(tmp_path / "j.json"), tok)
+    fake = h.__new__(h)
+    fake.client_address = ("192.168.1.20", 5000)
+    fake.path = "/"
+    assert not fake._authorized()
+    fake.path = f"/?k={tok}"
+    assert fake._authorized()
+    fake.client_address = ("127.0.0.1", 5000)
+    fake.path = "/"
+    assert fake._authorized()

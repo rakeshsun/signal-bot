@@ -191,6 +191,18 @@ class BosPullback(Strategy):
                             info={"setup": f"BOS {'up' if d > 0 else 'down'} after retest, pullback {pull:,.1f}"})
         return out
 
+    def levels(self, bars: list[Bar], ctx: Context):
+        if len(bars) < 4 * self.p.swing + 5:
+            return []
+        _, active = self._run(bars)
+        if not active:
+            return []
+        s = active[-1]
+        buy = s.d == 1
+        cancel = s.ref - self.p.invalid_ticks * self.p.tick if buy else s.ref + self.p.invalid_ticks * self.p.tick
+        return [("Broken level", s.ref, "level"), (f"{'Buy' if buy else 'Sell'} trigger", s.ext, "trigger"),
+                ("Cancel", cancel, "cancel")]
+
     def checklist(self, bars: list[Bar], ctx: Context) -> list[ChecklistRow]:
         return [(a, b, None) for a, b, _ in self.summary(bars, ctx)]
 

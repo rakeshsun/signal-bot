@@ -47,7 +47,7 @@ case "${1:-status}" in
                launchctl print "$DOMAIN/$LABEL" | grep -E "state =|pid =|last exit code" ; else echo "not running"; fi ;;
   logs)      tail -n 50 -f "$LOG" ;;
   errors)    tail -n 50 "$ERR" 2>/dev/null || echo "no errors logged" ;;
-  dashboard) open "$REPO/logs/dashboard.html" ;;
+  dashboard) open "http://localhost:8765/" 2>/dev/null || open "$REPO/logs/dashboard.html" ;;
   uninstall) launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true; rm -f "$PLIST"; echo "removed" ;;
   *) echo "usage: $0 install|start|stop|restart|status|logs|errors|dashboard|uninstall"; exit 1 ;;
 esac

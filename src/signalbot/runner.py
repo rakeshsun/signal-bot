@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import dashboard, messages, news, strategies
+from . import dashboard, messages, news, server, strategies
 from .bars import CHICAGO, hhmm
 from .config import Settings, Watch
 from .engine import Result, simulate
@@ -212,15 +212,22 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
     log.info("started:\n%s", "\n\n".join(
         messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd)))
         for lv in lives))
+    links: list[str] = []
+    dport = s.dashboard_port if dashboard_path is not None else 0
+    if dashboard_path is not None and dport > 0:
+        token = server.load_token(s.state_dir, s.dashboard_token) if s.dashboard_lan else ""
+        links = server.start(dashboard_path, s.state_dir, dport, s.dashboard_lan, token)
+        for u in links:
+            log.info("dashboard web page: %s", u)
     if dashboard_path is not None:
-        dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info)
+        dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport, links)
         log.info("dashboard: %s", dashboard_path)
 
     async def dash_loop() -> None:  # live price + live checks on the page every 10 s
         while dashboard_path is not None:
             await asyncio.sleep(10)
             try:
-                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info)
+                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport, links)
             except Exception as exc:
                 log.debug("dashboard update failed: %s", exc)
 
@@ -327,7 +334,7 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
 
             if dashboard_path is not None:
                 try:
-                    dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(now_ct), info)
+                    dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(now_ct), info, dport, links)
                 except Exception as exc:
                     log.warning("dashboard update failed: %s", exc)
     finally:

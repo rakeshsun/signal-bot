@@ -9,6 +9,12 @@ heartbeat_hhmm = 715
 # Also read this week's CPI / jobs-report dates from the ForexFactory feed.
 fetch_news_calendar = true
 
+# Dashboard web page served by the bot: http://localhost:8765/ (0 turns it off).
+dashboard_port = 8765
+# true = also open it on your phone over the same Wi-Fi. The phone link (with its access key)
+# is printed in logs/signalbot.log and on the dashboard footer.
+dashboard_lan = false
+
 [notify]
 # Free phone push: install "ntfy" (developer Philipp Heckel) and subscribe to this topic.
 # Pick a hard-to-guess name - anyone who knows it can read your alerts.
@@ -25,11 +31,6 @@ macos_banner = true
 [[watch]]
 name = "gold"
 strategy = "metals_confluence"
-# Which gold contract to watch:
-#   "auto"   = the active (most traded) month; switches by itself at each roll
-#   "/GCG27" = February 2027 (also /GCZ26 Dec 2026, /GCJ27 Apr 2027 ...). Month codes:
-#              F Jan, G Feb, H Mar, J Apr, K May, M Jun, N Jul, Q Aug, U Sep, V Oct, X Nov, Z Dec
-#   Use the full-size GC code even if you trade /MGC: the signal is the same, alerts show both.
 symbol = "auto"
 product = "GC"
 interval = "15m"
@@ -42,105 +43,7 @@ point_value = 100                       # $ per point of the data symbol (backte
 atr_mult = 1.75
 rr = 1.5
 session_start = 720
-session_end = 830     # 1-year test: before the 8:30 US open is clearly better
-skip_bars = "745"     # signal bar right after 7:30 CT data releases: 1 win in 10 over the year
-
-[[watch]]
-name = "gold-vwap"
-strategy = "vwap_fade"                  # fade a 3-ATR stretch from session VWAP once the bar turns back
-symbol = "auto"
-product = "GC"
-interval = "15m"
-enabled = false                         # set true to get alerts (keep paper = true until it proves itself)
-paper = true
-contracts = { "/MGC" = 10, "/GC" = 100 }
-point_value = 100
-
-[watch.params]   # 7:30-11:00 CT. 1-year test: 102 trades, 74% wins, PF 1.91; unseen Jun-Oct: 73%, PF 1.74
-stretch_atr = 3.0
-stop_atr = 1.5
-target_atr = 1.0
-session_start = 730
-session_end = 1100
-
-
-[[watch]]
-name = "gold-bos"
-strategy = "bos_pullback"               # LuxAlgo Valid BOS Pullback logic + our entry/stop/target
-symbol = "auto"
-product = "GC"
-interval = "3m"
-enabled = false
-paper = true                            # alerts say PAPER: watch / paper trade only
-contracts = { "/MGC" = 10, "/GC" = 100 }
-point_value = 100
-
-[watch.params]   # Asia 6 PM - 2 AM CT. 1-year test: 154 trades, 48% wins, PF 1.87, +$9.0k per MGC, DD $913
-swing = 2
-lookback = 24
-invalid_ticks = 20
-min_clean = 3
-rr = 2.0
-session_start = 1800
-session_end = 200
-
-
-[[watch]]
-name = "gold-asia"
-strategy = "metals_confluence"
-symbol = "auto"                         # or e.g. "/GCG27", same as the gold watch
-product = "GC"
-interval = "15m"
-enabled = true
-paper = true                            # alerts say PAPER: watch / paper trade only
-contracts = { "/MGC" = 10, "/GC" = 100 }
-point_value = 100
-
-[watch.params]   # Asia session 6 PM - 2 AM CT (1-year test: 43% wins, PF 1.4, profitable both halves)
-session_start = 1800
-session_end = 200
-
-
-[[watch]]
-name = "gold-levels"
-strategy = "levels_fvg"                 # key levels + fair value gaps combined
-symbol = "auto"
-product = "GC"
-interval = "15m"
-enabled = true
-paper = true                            # alerts say PAPER: watch / paper trade only
-contracts = { "/MGC" = 10, "/GC" = 100 }
-point_value = 100
-
-[watch.params]   # FVG that forms at prior-day high/low, then retested - Asia session
-# 1-year test: 39 trades, 46% wins, PF 1.94, profitable both halves, never same night as gold-asia
-mode = "level_fvg"                      # "level_fvg" | "sweep_fvg" | "fvg_retest" | "level_reject"
-session_start = 1800
-session_end = 200
-rr = 2.0
-trend_filter = false
-
-
-[[watch]]
-name = "gold-smc"
-strategy = "smc"                        # Smart Money Concepts: BOS/CHoCH + order block pullback
-symbol = "auto"
-product = "GC"
-interval = "15m"
-enabled = true
-paper = true                            # alerts say PAPER: watch / paper trade only
-contracts = { "/MGC" = 10, "/GC" = 100 }
-point_value = 100
-
-[watch.params]   # London session 2-7 AM CT
-# 1-year test: 99 trades, 37% wins, PF 1.71, profitable both halves (shorts did most of the work)
-breaks = "both"                         # "choch" | "bos" | "both"
-zone = "ob"                             # "ob" (order block) | "fvg"
-discount = false
-session_start = 200
-session_end = 700
-rr = 2.0
-
+session_end = 930
 
 [[watch]]
 name = "es"
@@ -156,17 +59,6 @@ point_value = 50
 rr = 1.0
 
 [news_days]
-# Oct 2025 - Mar 2026 (shutdown-shifted dates; Oct 2025 CPI and jobs were canceled)
-"2025-10-24" = "CPI"
-"2025-11-20" = "Jobs report"
-"2025-12-16" = "Jobs report"
-"2025-12-18" = "CPI"
-"2026-01-09" = "Jobs report"
-"2026-01-13" = "CPI"
-"2026-02-11" = "Jobs report"
-"2026-02-13" = "CPI"
-"2026-03-06" = "Jobs report"
-"2026-03-11" = "CPI"
 # CPI / jobs report days (release 7:30 CT). Add 2027 dates when BLS publishes them.
 "2026-04-03" = "Jobs report"
 "2026-04-10" = "CPI"
@@ -186,5 +78,3 @@ rr = 1.0
 "2026-11-10" = "CPI"
 "2026-12-04" = "Jobs report"
 "2026-12-10" = "CPI"
-"2027-01-08" = "Jobs report"
-"2027-01-13" = "CPI"

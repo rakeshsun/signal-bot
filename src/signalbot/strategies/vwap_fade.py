@@ -142,3 +142,18 @@ def _vwap_summary(self, bars, ctx, live=None):
 
 
 VwapFade.summary = _vwap_summary
+
+
+def _vwap_levels(self, bars, ctx):
+    if len(bars) < 30:
+        return []
+    h = [b.high for b in bars]
+    lo = [b.low for b in bars]
+    c = [b.close for b in bars]
+    a = ta.atr(h, lo, c, 14)[-1] or 0
+    vw = session_vwap(bars)
+    return [("VWAP", vw, "series"), ("Sell zone", vw[-1] + self.p.stretch_atr * a, "zone"),
+            ("Buy zone", vw[-1] - self.p.stretch_atr * a, "zone")]
+
+
+VwapFade.levels = _vwap_levels

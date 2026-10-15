@@ -49,6 +49,11 @@ class Strategy(ABC):
     def __init__(self, params: Any | None = None) -> None:
         self.p = params if params is not None else self.Params()
 
+    def levels(self, bars: list[Bar], ctx: Context) -> list[tuple[str, Any, str]]:
+        """Lines for the dashboard's mini chart: (label, price or per-bar list, kind). ``bars`` include
+        the forming bar. kind: "series" (a line through the bars), "trigger", "level", "cancel", "zone"."""
+        return []
+
     def summary(self, bars: list[Bar], ctx: Context, live: Bar | None = None) -> list[tuple[str, str, bool]]:
         """Plain-language status for the dashboard: (label, text, highlight). ``bars`` are closed bars,
         ``live`` the still-forming bar (or None). Default: nothing - the dashboard shows the checklist."""

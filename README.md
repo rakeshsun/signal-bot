@@ -149,19 +149,19 @@ What it does (macOS `launchd`, file `~/Library/LaunchAgents/com.signalbot.plist`
 
 ### Dashboard
 
-At the top, one big word per watch tells you what to do now:
+While the bot runs it serves the dashboard at **http://localhost:8765/**
+(`./scripts/service.sh dashboard` opens it). It updates in place every 10 seconds:
+a "do this now" card, today's signal summary, and one panel per strategy with a mini chart
+(candles plus the strategy's levels and the open trade's entry / stop / target), countdowns to
+the bar close and the next session, the plain-language next step and recent trades.
 
-| Shows | When | What to do |
-|---|---|---|
-| **BUY** / **SELL** (flashing, tab title blinks) | a new signal, for 30 minutes after it fires | enter on Robinhood, then set the stop and limit shown |
-| **HOLD** | a trade is open | nothing; keep your stop and limit in place |
-| **EXIT** | a trade closed in the last 30 minutes | check Robinhood; cancel the leftover order (or close, for a time exit) |
-| **NO ACTION** | flat | nothing; it says whether it's watching now or when the next window opens |
+- **Sound**: click *Enable sound* once per browser tab; a chime plays when a new signal fires.
+- **Journal**: mark each signal *Took it* or *Skipped*. "My journal" totals what you took and
+  what the skipped ones would have made. Saved in `state/journal.json`.
+- **Phone**: set `dashboard_lan = true` in `config.toml` and restart. The phone link (same
+  Wi-Fi, includes an access key) is in `logs/signalbot.log` and on the dashboard footer.
 
-Below that, while the bot runs it rewrites `logs/dashboard.html` every minute: one card per watch with the
-live 8-check table, the open trade (entry, stop, target, current P/L per contract), the recent
-trades with win rate, the last 25 alerts, and upcoming news days. Open it with
-`./scripts/service.sh dashboard` (or double-click the file); it refreshes itself every minute.
+`logs/dashboard.html` is still written and can be opened as a file (no sound or journal there).
 If its "updated" time is old, the bot has stopped.
 
 ### Day to day
@@ -190,20 +190,6 @@ If its "updated" time is old, the bot has stopped.
   calendar when `fetch_news_calendar = true`. Add 2027 dates when BLS publishes them.
 - **Heartbeat**: weekdays at 7:15 CT, a "running" message with each watch's checklist.
 - **Watchdog**: an alert if a watch gets no new candles for 45 minutes while the market is open.
-
-## One year of history (Databento)
-
-tastytrade only streams a few months of 15-minute history, so for longer backtests download real
-CME data from [Databento](https://databento.com) (pay-as-you-go; new accounts have come with free
-credit, and a year of 1-minute gold bars costs little):
-
-```bash
-pip install -e ".[data]"
-echo "DATABENTO_API_KEY=db-..." >> .env          # Databento portal -> API keys
-python scripts/fetch_databento.py --root GC --days 365   # shows the cost and asks first
-signalbot backtest gold --csv data/GC_15m.csv
-signalbot backtest gold --csv data/GC_15m.csv --set session_end=830   # compare windows
-```
 
 ## Development
 ```bash

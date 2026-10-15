@@ -190,3 +190,15 @@ def _metals_summary(self, bars, ctx, live=None):
 
 
 MetalsConfluence.summary = _metals_summary
+
+
+def _metals_levels(self, bars, ctx):
+    from .. import indicators as ta
+
+    if len(bars) < 60:
+        return []
+    c = [b.close for b in bars]
+    return [("EMA 20", ta.ema(c, self.p.fast_len), "series"), ("EMA 50", ta.ema(c, self.p.slow_len), "series2")]
+
+
+MetalsConfluence.levels = _metals_levels

@@ -1,6 +1,7 @@
 """A self-contained HTML status page, rewritten every minute by the live bot.
 
-Open logs/dashboard.html in a browser (it reloads itself every 60 s). No server needed.
+Best viewed at http://localhost:8765/ (served by the bot: live updates, sound, journal, phone
+access). logs/dashboard.html still works opened as a file (it reloads itself every 15 s).
 Layout: sticky top bar (instrument price), strategy rail, one "now" card (BUY / SELL / HOLD /
 EXIT or no action), then a folding panel per strategy (position, session timeline, next step,
 recent trades) and the activity feed. Dark by default with a remembered light/dark switch.
@@ -9,6 +10,7 @@ recent trades) and the activity feed. Dark by default with a remembered light/da
 from __future__ import annotations
 
 import html
+import json
 import os
 import time
 from datetime import date, datetime
@@ -256,6 +258,11 @@ def _state(lv, now_ct):
     return f"Opens {_window(lv).split(' and ')[0]}", "off", False, False
 
 
+def _opens_in(lv, now_ct) -> str:
+    t = _next_open_ms(lv, now_ct)
+    return f' · in <span class="cd" data-t="{t}">–</span>' if t else ""
+
+
 def _watch(lv, nd) -> str:
     w = lv.watch
     bars = lv.book.closed_bars()
@@ -272,13 +279,14 @@ def _watch(lv, nd) -> str:
     return f"""<details class="watch {cls}" id="{slug}" data-key="{E(key)}"{' data-force="1"' if force else ''}{' open' if is_open else ''}>
   <summary class="wh">
     <span class="w-id"><span class="w-name">{E(w.name.title())}</span>{'<span class="paper">Paper</span>' if w.paper else '<span class="live-tag">Live</span>'}</span>
-    <span class="w-state {cls}">{E(label)}</span>
+    <span class="w-state {cls}">{E(label)}{_opens_in(lv, now_ct) if cls == "off" else ""}</span>
     <span class="w-stats" title="Last {st['days']} days in the loaded history">
       <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{st['pf']:.2f}</b> PF</span><span><b class="{'up' if st['net'] >= 0 else 'down'}">{st['usd']}</b> per {E(st['unit'])}</span>
     </span>
     <span class="chev" aria-hidden="true"></span>
   </summary>
   <div class="w-body">
+    {_chart(lv, bars, _live(lv)[1])}
     <div class="cols">
       <div class="col-a"><h3>Position</h3>{_position(lv, last)}{_timeline(lv, news_today)}</div>
       <div class="col-b"><h3>Next step</h3>{_checks(lv, nd)}</div>
@@ -298,11 +306,18 @@ def _recent(lv) -> str:
         f'<td><span class="tag {"long" if t.direction > 0 else "short"}">{"Long" if t.direction > 0 else "Short"}</span></td>'
         f'<td class="num">{_px(t.entry_price or t.signal_close)}</td><td class="num">{_px(t.exit_price)}</td>'
         f'<td>{E({"target": "Target", "stop": "Stop", "time": "Time exit"}.get(t.exit_reason or "", "Open"))}</td>'
-        f'<td class="num {"up" if (t.points or 0) > 0 else "down" if t.points is not None else ""}">{"" if t.points is None else f"{t.points:+.2f}"}</td></tr>'
+        f'<td class="num {"up" if (t.points or 0) > 0 else "down" if t.points is not None else ""}">{"" if t.points is None else f"{t.points:+.2f}"}</td>'
+        f'<td>{_jr(lv, t)}</td></tr>'
         for t in trades)
     return (f'<details class="more trades" data-key="t:{E(lv.watch.name)}"><summary>Recent trades ({len(trades)})</summary>'
-            '<table class="tt"><thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th></tr></thead>'
+            '<table class="tt"><thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th><th>You</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></details>')
+
+
+def _jr(lv, t) -> str:
+    k = E(f"{lv.watch.name}|{t.signal_time}")
+    return (f'<span class="jr" data-k="{k}"><button type="button" data-c="took">Took it</button>'
+            f'<button type="button" data-c="skipped">Skipped</button></span>')
 
 
 def _alerts(alerts: list[dict]) -> str:
@@ -502,6 +517,38 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 .al.entry summary{color:var(--gold-ink)}.al.warning summary{color:var(--down)}.al.exit summary{color:var(--ink)}
 .foot{color:var(--faint);font-size:12px;margin:6px 0 0;text-align:center}
 
+/* mini chart */
+.chart{margin:0 0 16px;border:1px solid var(--line);border-radius:12px;background:var(--raise);padding:10px 10px 6px}
+.ch-plot{display:grid;grid-template-columns:minmax(0,1fr) 118px;height:190px}
+.chart svg{display:block;width:100%;height:190px;overflow:visible}
+.ch-lbl{position:relative;font-size:11.5px;font-weight:600;color:var(--soft)}
+.ch-lbl .lb{position:absolute;left:8px;transform:translateY(-50%);white-space:nowrap;line-height:1}
+.chart figcaption{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--faint);padding:6px 118px 0 0}
+.chart .cu{stroke:var(--up);fill:var(--up)}.chart .cd{stroke:var(--down);fill:var(--down)}
+.chart line.cu,.chart line.cd{vector-effect:non-scaling-stroke;stroke-width:1}.chart .cl{opacity:.55}
+.chart .ln{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}.chart .ln.series{stroke:var(--gold)}.chart .ln.series2{stroke:#6c8ff0}
+.chart .lv2{stroke-width:1;stroke-dasharray:4 3;stroke:var(--faint);vector-effect:non-scaling-stroke}
+.chart .lv2.trigger,.chart .lv2.entry{stroke:var(--gold)}.chart .lv2.level{stroke:var(--soft)}.chart .lv2.cancel,.chart .lv2.stop{stroke:var(--down)}
+.chart .lv2.target{stroke:var(--up)}.chart .lv2.zone{stroke:#6c8ff0}.chart .lv2.now{stroke:var(--ink);stroke-dasharray:1 3;opacity:.6}
+.chart .lv2.entry,.chart .lv2.stop,.chart .lv2.target{stroke-dasharray:none;stroke-width:1.4}
+.lb.trigger,.lb.entry,.lb.series{color:var(--gold-ink)}.lb.cancel,.lb.stop{color:var(--down)}.lb.target{color:var(--up)}.lb.zone,.lb.series2{color:#6c8ff0}
+.cd{font-weight:700;font-variant-numeric:tabular-nums}
+/* today, journal, sound */
+.today{margin:0;padding:10px 16px;border-radius:12px;background:var(--surface);border:1px solid var(--line);font-size:14px;color:var(--soft)}.today b{color:var(--ink)}.today b.up{color:var(--up)}.today b.down{color:var(--down)}
+.jr{display:inline-flex;gap:4px;flex-wrap:wrap}
+.jr button{font:inherit;font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:7px;border:1px solid var(--line-2);background:transparent;color:var(--soft);cursor:pointer}
+.jr button:hover{color:var(--ink);border-color:var(--soft)}
+.jr button.on[data-c=took]{background:var(--up);border-color:var(--up);color:#fff}.jr button.on[data-c=skipped]{background:var(--soft);border-color:var(--soft);color:var(--surface)}
+.sigbtn .jr{margin-top:8px}.sigbtn .jr button{color:inherit;border-color:currentColor;font-size:13px;padding:5px 12px}
+.sigbtn.flash .jr button.on{background:#fff;color:#14181f;border-color:#fff}
+.tt th:nth-child(7){width:150px}.jt th{width:auto!important}
+.jr-sum{margin:0 0 6px;font-size:14px;color:var(--soft)}.jr-sum b{color:var(--ink)}
+.tbtn{font:inherit;font-size:12px;color:var(--soft);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:5px 10px;cursor:pointer}
+.tbtn:hover{color:var(--ink);border-color:var(--soft)}.tbtn:focus-visible,.jr button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+#sound.on{color:var(--gold-ink);border-color:var(--gold);background:var(--gold-2)}
+.foot .phone{display:block;margin-top:4px;word-break:break-all}
+@media (max-width:620px){.ch-plot,.chart svg{height:150px}.ch-plot{grid-template-columns:minmax(0,1fr) 104px}.chart figcaption{padding-right:0}.chart figcaption span:first-child,.chart figcaption span:last-child{display:none}.tt th:nth-child(7){width:auto}.tt td:nth-child(7) .jr button{padding:3px 6px}}
+
 /* motion */
 @media (prefers-reduced-motion:no-preference){
 .act.flash,.sigbtn.flash{animation:flash 1s steps(2,jump-none) infinite alternate}
@@ -518,7 +565,7 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
   .rail h2,.rail .rn{display:none}.ri{flex:0 0 auto;background:var(--surface);border-color:var(--line)}
   .tk-note{display:none}}
 @media (max-width:820px){.cols{grid-template-columns:minmax(0,1fr);gap:18px}.w-stats{display:none}.wh{grid-template-columns:auto minmax(0,1fr) 18px}}
-@media (max-width:620px){.top-in{flex-wrap:wrap;gap:8px 16px;padding:10px 16px}.tick{border-left:0;padding-left:0}.status{margin-left:0;width:100%;justify-content:space-between}
+@media (max-width:620px){.top-in{flex-wrap:wrap;gap:8px 16px;padding:10px 16px}.tick{border-left:0;padding-left:0}.status{margin-left:0;width:100%;flex-wrap:wrap;gap:6px 10px;white-space:normal}.status #upd{flex:1 1 auto}.tbtn{padding:5px 8px}
   .shell{padding:14px 12px 40px}.wh{grid-template-columns:minmax(0,1fr) 18px;gap:8px 10px;padding:12px 14px}.w-state{grid-column:1;grid-row:2}
   .w-body{padding:14px}.act{grid-template-columns:minmax(0,1fr);padding:16px}.act.flash .act-word{font-size:46px}
   .tt th:nth-child(4),.tt td:nth-child(4){display:none}.pos.long,.pos.short{grid-template-columns:minmax(0,1fr)}.ladder{min-height:140px}
@@ -541,10 +588,10 @@ def _signal_button(lv) -> str:
     levels = f"Entry {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}"
     if mins <= FRESH_MIN:
         ago = "just now" if mins < 2 else f"{mins} min ago"
-        return (f'<div class="sigbtn flash {"buy" if buy else "sell"}" role="alert"><span class="sb-word">{side} NOW</span>'
-                f'<span class="sb-lv">{levels}</span><span class="sb-sm">signal {_clock(fired)} ({ago}) · don\'t enter if price ran far past entry</span></div>')
+        return (f'<div class="sigbtn flash {"buy" if buy else "sell"}" role="alert" data-sig="{E(lv.watch.name)}|{t.signal_time}"><span class="sb-word">{side} NOW</span>'
+                f'<span class="sb-lv">{levels}</span><span class="sb-sm">signal {_clock(fired)} ({ago}) · don\'t enter if price ran far past entry</span>{_jr(lv, t)}</div>')
     return (f'<div class="sigbtn hold {"buy" if buy else "sell"}"><span class="sb-word">HOLD {"LONG" if buy else "SHORT"}</span>'
-            f'<span class="sb-lv">{levels}</span><span class="sb-sm">only if you took it · no new entry until it closes</span></div>')
+            f'<span class="sb-lv">{levels}</span><span class="sb-sm">only if you took it · no new entry until it closes</span>{_jr(lv, t)}</div>')
 
 
 def _in_window(lv, now: datetime) -> bool | None:
@@ -596,13 +643,154 @@ def _action(lv) -> str:
     return f'<span class="chip{" on" if inwin else ""}"><b>{E(lv.watch.name.title())}</b> {sub}</span>'
 
 
+def _chart(lv, bars, live_bar) -> str:
+    """Inline SVG: recent candles plus the strategy's levels and the open trade's entry/stop/target."""
+    n = 80 if lv.book.bar_ms <= 300_000 else 48
+    allb = bars + ([live_bar] if live_bar is not None else [])
+    view = allb[-n:]
+    if len(view) < 5:
+        return ""
+    try:
+        lv_lines = lv.strategy.levels(allb, Context(lv.symbol, {}))
+    except Exception:
+        lv_lines = []
+    t = lv.res.open_trade if lv.res else None
+    lines = []  # (label, price, kind)
+    series = []  # (label, values aligned to view, kind)
+    for label, val, kind in lv_lines:
+        if isinstance(val, list):
+            series.append((label, val[-len(view):], kind))
+        elif val is not None:
+            lines.append((label, float(val), kind))
+    if t:
+        lines += [("Entry", t.entry_price or t.signal_close, "entry"), ("Stop", t.stop, "stop"), ("Target", t.target, "target")]
+    lo = min(b.low for b in view)
+    hi = max(b.high for b in view)
+    rng = max(hi - lo, 1e-9)
+    shown = [x for x in lines if lo - rng * 0.8 <= x[1] <= hi + rng * 0.8]
+    for _, p, _ in shown:
+        lo, hi = min(lo, p), max(hi, p)
+    pad = (hi - lo) * 0.06 or 1
+    lo, hi = lo - pad, hi + pad
+    W, H, T, B = 600, 190, 8, 8  # plot area only; price labels sit in an HTML column on the right
+    cw = W / len(view)
+
+    def y(p: float) -> float:
+        return T + (hi - p) / (hi - lo) * (H - T - B)
+
+    out, labels = [], []  # labels: (y, text, kind)
+    for i, b in enumerate(view):
+        x = i * cw + cw / 2
+        cls = "cu" if b.close >= b.open else "cd"
+        if live_bar is not None and b is live_bar:
+            cls += " cl"
+        top, bot = y(max(b.open, b.close)), y(min(b.open, b.close))
+        out.append(f'<line class="{cls}" x1="{x:.1f}" x2="{x:.1f}" y1="{y(b.high):.1f}" y2="{y(b.low):.1f}"/>'
+                   f'<rect class="{cls}" x="{x - cw * 0.32:.1f}" y="{top:.1f}" width="{max(cw * 0.64, 1):.1f}" height="{max(bot - top, 0.8):.1f}"/>')
+    for label, vals, kind in series:
+        pts = " ".join(f"{i * cw + cw / 2:.1f},{y(v):.1f}" for i, v in enumerate(vals) if v is not None and lo <= v <= hi)
+        if pts:
+            out.append(f'<polyline class="ln {kind}" points="{pts}"/>')
+            last = next((v for v in reversed(vals) if v is not None), None)
+            if last is not None and lo <= last <= hi:
+                labels.append((y(last), f"{label} {last:,.1f}", kind))
+    for label, p, kind in shown:
+        out.append(f'<line class="lv2 {kind}" x1="0" x2="{W}" y1="{y(p):.1f}" y2="{y(p):.1f}"/>')
+        labels.append((y(p), f"{label} {p:,.1f}", kind))
+    lastc = view[-1].close
+    out.append(f'<line class="lv2 now" x1="0" x2="{W}" y1="{y(lastc):.1f}" y2="{y(lastc):.1f}"/>')
+    tags, used = [], []
+    for yy, text, kind in sorted(labels):  # top to bottom, pushed apart so they never overlap
+        ty = max(yy, (used[-1] + 13) if used else 0)
+        used.append(ty)
+        tags.append(f'<span class="lb {kind}" style="top:{ty / H * 100:.1f}%">{E(text)}</span>')
+    mins = lv.book.bar_ms // 60000
+    cd = ""
+    if live_bar is not None:
+        cd = f' · bar closes in <span class="cd" data-t="{live_bar.time + lv.book.bar_ms}">–</span>'
+    return (f'<figure class="chart"><div class="ch-plot"><svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" '
+            f'aria-label="Last {len(view)} {mins}-minute candles with strategy levels">{"".join(out)}</svg>'
+            f'<div class="ch-lbl">{"".join(tags)}</div></div>'
+            f'<figcaption><span>{_clock(view[0].time)}</span><span>Last {len(view)} {mins}-min candles{cd}</span>'
+            f'<span>{_clock(view[-1].time)}</span></figcaption></figure>')
+
+
+def _next_open_ms(lv, now_ct) -> int | None:
+    """Epoch ms of the next time this watch's entry window opens."""
+    from datetime import timedelta
+
+    p = lv.strategy.p
+    a = getattr(p, "session_start", getattr(p, "from_hhmm", None))
+    b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
+    if a is None or b is None:
+        return None
+    night = a > b
+    for add in range(0, 8):
+        d = (now_ct + timedelta(days=add)).replace(hour=a // 100, minute=a % 100, second=0, microsecond=0)
+        if d <= now_ct:
+            continue
+        ok = d.weekday() in (6, 0, 1, 2, 3) if night else d.weekday() < 5
+        if ok:
+            return int(d.timestamp() * 1000)
+    return None
+
+
+def _today(lives, now_ct) -> str:
+    """One line: today's signals across all strategies (CME day starts 17:00 CT the day before)."""
+    from datetime import timedelta
+
+    start = now_ct.replace(hour=17, minute=0, second=0, microsecond=0)
+    if now_ct.hour < 17:
+        start -= timedelta(days=1)
+    s_ms = start.timestamp() * 1000
+    n = won = lost = 0
+    pts = usd = 0.0
+    open_n = 0
+    for lv in lives:
+        if not lv.res:
+            continue
+        ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
+        for t in lv.res.trades:
+            if t.signal_time < s_ms:
+                continue
+            n += 1
+            if t.is_open:
+                open_n += 1
+            elif t.points is not None:
+                won += t.points > 0
+                lost += t.points <= 0
+                pts += t.points
+                usd += t.points * ppt
+    if not n:
+        return '<p class="today">Today: no signals yet.</p>'
+    parts = [f"<b>{n}</b> signal{'s' if n != 1 else ''}", f"<b>{won}</b> won", f"<b>{lost}</b> lost"]
+    if open_n:
+        parts.append(f"<b>{open_n}</b> open")
+    return (f'<p class="today">Today: {", ".join(parts)}. Paper result <b class="{"up" if pts >= 0 else "down"}">'
+            f'{pts:+.1f} pts ({_usd(usd)} per micro)</b>.</p>')
+
+
+def _trades_json(lives) -> str:
+    rows = []
+    for lv in lives:
+        if not lv.res:
+            continue
+        ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
+        for t in lv.res.trades[-40:]:
+            rows.append({"k": f"{lv.watch.name}|{t.signal_time}", "w": lv.watch.name.title(), "paper": lv.watch.paper,
+                         "t": t.signal_time + lv.book.bar_ms, "side": "Long" if t.direction > 0 else "Short",
+                         "entry": t.entry_price or t.signal_close, "pts": t.points, "usd": None if t.points is None else round(t.points * ppt, 2),
+                         "res": t.exit_reason or "open"})
+    return json.dumps(rows).replace("</", "<\\/")
+
+
 def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     items = []
     for lv in lives:
         slug = "w-" + "".join(c if c.isalnum() else "-" for c in lv.watch.name.lower())
         label, cls, _, _ = _state(lv, now_ct) if lv.res else ("Waiting for data", "off", False, False)
         items.append(f'<a class="ri {cls}" href="#{slug}"><span class="ri-dot"></span><span class="ri-name">{E(lv.watch.name.title())}'
-                     f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}</span></a>')
+                     f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}{_opens_in(lv, now_ct) if cls == "off" else ""}</span></a>')
     if news_today:
         news = f'<p class="rn hot"><b>{E(news_today)} today, 7:30 CT.</b> Gold takes no new entries 7:00–8:00.</p>'
     elif upcoming:
@@ -666,12 +854,13 @@ def _hero(lives, acts) -> str:
     if watching:
         parts.append(", ".join(f"<b>{E(lv.watch.name.title())}</b> is watching until {_window(lv).split(' and ')[1].replace(' CT', '')}" for lv in watching))
     if later:
-        parts.append("next: " + ", ".join(f"{E(lv.watch.name.title())} at {_window(lv).split(' and ')[0]}" for lv in later))
+        parts.append("next: " + ", ".join(f"{E(lv.watch.name.title())} at {_window(lv).split(' and ')[0]}{_opens_in(lv, now_ct)}" for lv in later))
     return (f'<section class="hero calm"><p class="h-word">No action</p>'
             f'<p class="h-sub">{"; ".join(parts) or "No strategies running."}. You will get a phone alert the moment a signal fires.</p></section>')
 
 
-def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool, info=None) -> str:
+def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool, info=None,
+           port: int = 0, links: list[str] | None = None) -> str:
     now_ct = datetime.now(CHICAGO)
     today = now_ct.date()
     past_news = now_ct.hour >= 8  # today's 7:30 release and the 7:00-8:00 block are over
@@ -685,6 +874,9 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
             title = f"{'BUY' if lv.res.open_trade.direction > 0 else 'SELL'} {lv.symbol} · Signal Desk"
             break
     now = time.time()
+    phone = ""
+    if links and len(links) > 1:
+        phone = f' <span class="phone">On your phone (same Wi-Fi): <b>{E(links[1])}</b></span>'
     return f"""<!doctype html>
 <html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <noscript><meta http-equiv="refresh" content="15"></noscript><title>{E(title)}</title>
@@ -697,32 +889,65 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 {_ticker(lives)}
 <p class="status"><span class="mk{' on' if mkt_open else ''}"><span class="dot"></span>Market {'open' if mkt_open else 'closed'}</span>
 <span id="upd" data-t="{int(now)}">Updated {_clock(now)} CT</span>
-<button id="theme" type="button" aria-label="Switch light or dark theme">Theme</button></p>
+<button id="sound" class="tbtn" type="button" aria-label="Play a chime when a new signal fires">Enable sound</button>
+<button id="theme" class="tbtn" type="button" aria-label="Switch light or dark theme">Theme</button></p>
 </div></header>
 <div class="shell">
 {_rail(lives, now_ct, upcoming, news_today, info or {})}
 <main class="main">
 {_hero(lives, acts)}
+{_today(lives, now_ct)}
 {watches}
+<section class="panel journal"><h2>My journal</h2><div id="jr-body"></div></section>
 <section class="panel activity"><h2>Activity</h2>{_alerts(alerts)}</section>
-<p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)}. The page refreshes every 15 seconds.</p>
+<p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)}. Updates every 10 seconds.{phone}</p>
 </main></div>
-<script>
-(function(){{var e=document.getElementById('upd');var t=+e.dataset.t;setInterval(function(){{var m=Math.floor((Date.now()/1000-t)/60);
-if(m>=3){{e.textContent='Not updated for '+m+' min: the bot may have stopped';e.className='stale';}}}},20000);
-if(document.querySelector('.act.flash')){{var base=document.title,on=false;setInterval(function(){{on=!on;document.title=on?'🔔 '+base:base;}},900);}}
-function g(k){{try{{return localStorage.getItem(k)}}catch(x){{return null}}}}function st(k,v){{try{{localStorage.setItem(k,v)}}catch(x){{}}}}
-document.querySelectorAll('details[data-key]').forEach(function(d){{var k='sd:'+d.dataset.key,v=g(k);if(d.dataset.force==='1'){{d.open=true}}else if(v!==null){{d.open=v==='1'}}d.addEventListener('toggle',function(){{st(k,d.open?'1':'0')}})}});
-document.querySelectorAll('.ri').forEach(function(a){{a.addEventListener('click',function(){{var d=document.querySelector(a.getAttribute('href'));if(d&&d.tagName==='DETAILS')d.open=true}})}});
-var tb=document.getElementById('theme');function lab(){{tb.textContent=document.documentElement.dataset.theme==='light'?'Dark mode':'Light mode'}}lab();
-tb.addEventListener('click',function(){{var n=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=n;st('sd:theme',n);lab()}});
-try{{var y=sessionStorage.getItem('sd:y');if(y!==null)window.scrollTo(0,+y)}}catch(x){{}}
-setTimeout(function(){{try{{sessionStorage.setItem('sd:y',String(window.scrollY))}}catch(x){{}}location.reload()}},15000);}})();
-</script></body></html>"""
+<script id="trades-data" type="application/json">{_trades_json(lives)}</script>
+<script>__JS__</script></body></html>""".replace("__JS__", JS.replace("__PORT__", str(port or 8765)))
 
 
-def write(path: Path, lives, nd, alerts, started, mkt_open, info=None) -> None:
+def write(path: Path, lives, nd, alerts, started, mkt_open, info=None, port: int = 0, links: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(render(lives, nd, alerts, started, mkt_open, info), encoding="utf-8")
+    tmp.write_text(render(lives, nd, alerts, started, mkt_open, info, port, links), encoding="utf-8")
     os.replace(tmp, path)
+
+
+JS = r"""(function(){
+var D=document;
+function g(k){try{return localStorage.getItem(k)}catch(x){return null}}
+function st(k,v){try{localStorage.setItem(k,v)}catch(x){}}
+var HTTP=location.protocol.indexOf('http')===0, Q=location.search||'', journal={}, ctx=null;
+function fmt(ms){if(ms<=0)return 'now';var s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return h?h+'h '+(m<10?'0':'')+m+'m':m+':'+(x<10?'0':'')+x}
+function tick(){var n=Date.now();D.querySelectorAll('.cd[data-t]').forEach(function(e){e.textContent=fmt(+e.dataset.t-n)})}
+function stale(){var e=D.getElementById('upd');if(!e)return;var m=Math.floor((Date.now()/1000-(+e.dataset.t))/60);if(m>=3){e.textContent='Not updated for '+m+' min: the bot may have stopped';e.className='stale'}}
+function restore(){D.querySelectorAll('details[data-key]').forEach(function(d){var k='sd:'+d.dataset.key,v=g(k);if(d.dataset.force==='1'){d.open=true}else if(v!==null){d.open=v==='1'}d.addEventListener('toggle',function(){st(k,d.open?'1':'0')})});
+ D.querySelectorAll('.ri').forEach(function(a){a.addEventListener('click',function(){var d=D.querySelector(a.getAttribute('href'));if(d&&d.tagName==='DETAILS')d.open=true})})}
+function theme(){var tb=D.getElementById('theme');if(!tb)return;tb.textContent=D.documentElement.dataset.theme==='light'?'Dark mode':'Light mode';tb.onclick=function(){var n=D.documentElement.dataset.theme==='light'?'dark':'light';D.documentElement.dataset.theme=n;st('sd:theme',n);theme()}}
+function chime(){if(!ctx)return;var t=ctx.currentTime;[880,1320].forEach(function(f,i){var o=ctx.createOscillator(),gn=ctx.createGain();o.type='sine';o.frequency.value=f;var s=t+i*0.18;gn.gain.setValueAtTime(0.0001,s);gn.gain.exponentialRampToValueAtTime(0.3,s+0.02);gn.gain.exponentialRampToValueAtTime(0.0001,s+0.5);o.connect(gn);gn.connect(ctx.destination);o.start(s);o.stop(s+0.55)})}
+function soundBtn(){var b=D.getElementById('sound');if(!b)return;if(!HTTP){b.hidden=true;return}var on=!!ctx&&g('sd:sound')==='1';b.textContent=on?'Sound on':'Enable sound';b.classList.toggle('on',on);
+ b.onclick=function(){if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)()}catch(x){}}if(b.classList.contains('on')){st('sd:sound','0')}else{st('sd:sound','1');if(ctx){ctx.resume();chime()}}soundBtn()}}
+function checkSignal(){D.querySelectorAll('[data-sig]').forEach(function(e){var k='sd:chimed:'+e.dataset.sig;if(g(k))return;st(k,'1');if(ctx&&g('sd:sound')==='1')chime()})}
+function money(v){return (v<0?'-$':'+$')+Math.abs(v).toFixed(0)}
+function jrPaint(){D.querySelectorAll('.jr[data-k]').forEach(function(el){var c=(journal[el.dataset.k]||{}).choice||'';el.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b.dataset.c===c)})});
+ var body=D.getElementById('jr-body');if(!body||!HTTP)return;var rows=[];try{rows=JSON.parse(D.getElementById('trades-data').textContent)}catch(x){}
+ var mine=rows.filter(function(r){return journal[r.k]}).sort(function(a,b){return b.t-a.t});
+ if(!mine.length){body.innerHTML='<p class="muted">Mark a signal with <b>Took it</b> or <b>Skipped</b> (on the signal or in Recent trades) to start your journal.</p>';return}
+ var took=mine.filter(function(r){return journal[r.k].choice==='took'}),sk=mine.filter(function(r){return journal[r.k].choice==='skipped'});
+ function sum(a){return a.reduce(function(s,r){return s+(r.usd||0)},0)}
+ var h='<p class="jr-sum">Took <b>'+took.length+'</b>: '+money(sum(took))+' per micro if filled like the bot. Skipped <b>'+sk.length+'</b>: those would have made '+money(sum(sk))+'.</p><table class="tt jt"><thead><tr><th>Signal</th><th>Strategy</th><th>Side</th><th>Result</th><th class="num">$ per micro</th><th>You</th></tr></thead><tbody>';
+ mine.slice(0,15).forEach(function(r){var d=new Date(r.t);h+='<tr><td>'+d.toLocaleDateString([],{month:'short',day:'numeric'})+'<small>'+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'</small></td><td>'+r.w+(r.paper?' <small>paper</small>':'')+'</td><td><span class="tag '+r.side.toLowerCase()+'">'+r.side+'</span></td><td>'+r.res+'</td><td class="num '+((r.usd||0)>=0?'up':'down')+'">'+(r.usd==null?'open':money(r.usd))+'</td><td>'+(journal[r.k].choice==='took'?'Took it':'Skipped')+'</td></tr>'});
+ body.innerHTML=h+'</tbody></table>'}
+function jrLoad(){if(!HTTP){D.querySelectorAll('.jr').forEach(function(e){e.hidden=true});var b=D.getElementById('jr-body');if(b)b.innerHTML='<p class="muted">Open the dashboard at <b>http://localhost:__PORT__/</b> to use the journal and sound.</p>';return}
+ fetch('/api/journal'+Q,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}
+function jrBind(){D.querySelectorAll('.jr[data-k] button').forEach(function(b){b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();var k=b.closest('.jr').dataset.k,c=b.classList.contains('on')?'':b.dataset.c;
+ fetch('/api/journal'+Q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,choice:c})}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}})}
+function init(){restore();theme();soundBtn();jrBind();jrPaint();tick();stale();checkSignal()}
+window._bt=D.title;init();jrLoad();setInterval(tick,1000);setInterval(stale,20000);
+setInterval(function(){var f=D.querySelector('.act.flash');if(!f){D.title=window._bt;return}D.title=D.title.indexOf('🔔')===0?window._bt:'🔔 '+window._bt},900);
+if(HTTP){setInterval(function(){fetch(location.pathname+Q,{cache:'no-store'}).then(function(r){return r.text()}).then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');
+ ['.top-in','.shell'].forEach(function(sel){var a=D.querySelector(sel),b=doc.querySelector(sel);if(a&&b)a.innerHTML=b.innerHTML});
+ var td=doc.getElementById('trades-data');if(td)D.getElementById('trades-data').textContent=td.textContent;window._bt=doc.title;init()}).catch(function(){})},10000)}
+else{try{var y=sessionStorage.getItem('sd:y');if(y!==null)window.scrollTo(0,+y)}catch(x){}setTimeout(function(){try{sessionStorage.setItem('sd:y',String(window.scrollY))}catch(x){}location.reload()},15000)}
+})();
+"""
