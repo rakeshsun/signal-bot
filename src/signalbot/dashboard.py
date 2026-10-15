@@ -85,7 +85,7 @@ def _position(lv, last) -> str:
     if not t:
         return f"""<div class="pos flat">
   <p class="pos-state">Flat</p>
-  <p class="pos-sub">No open trade on {E(lv.symbol)}. Signals can fire between {_window(lv)}.</p>
+  <p class="pos-sub">No open trade on {E(lv.symbol)}.</p>
   <p class="price">{_px(now_px)}<span>{'live price' if live_px is not None else f'last close, {_clock(last.time + lv.book.bar_ms)} (market closed)'}</span></p>
 </div>"""
     up = (now_px - (t.entry_price or t.signal_close)) * t.direction
@@ -120,28 +120,35 @@ def _timeline(lv, news_today: str | None) -> str:
     b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
     if a is None or b is None:
         return ""
-    if a > b:  # overnight window (e.g. Asia): the morning strip doesn't apply
-        return f'<p class="tl-cap">Entry window {_window(lv)} (overnight)</p>'
-    start, end = 6 * 60, 12 * 60
+    night = a > b  # overnight window (e.g. Asia): show 4 PM - 4 AM instead of the morning
+    start, end = (16 * 60, 28 * 60) if night else (6 * 60, 12 * 60)
+
+    def mins(hhmm: int) -> int:
+        m = hhmm // 100 * 60 + hhmm % 100
+        return m + 24 * 60 if night and m < start else m
 
     def x(hhmm: int) -> float:
-        m = hhmm // 100 * 60 + hhmm % 100
-        return max(0.0, min(100.0, (m - start) / (end - start) * 100))
+        return max(0.0, min(100.0, (mins(hhmm) - start) / (end - start) * 100))
 
     now = datetime.now(CHICAGO)
     now_m = now.hour * 100 + now.minute
-    marker = f'<div class="tl-now" style="left:{x(now_m):.1f}%"><span>now</span></div>' if 600 <= now_m < 1200 and now.weekday() < 5 else ""
+    showing_now = start <= mins(now_m) < end and (night or now.weekday() < 5)
+    marker = f'<div class="tl-now" style="left:{x(now_m):.1f}%"><span>now</span></div>' if showing_now else ""
     news = (f'<div class="tl-news" style="left:{x(700):.1f}%;width:{x(800) - x(700):.1f}%" title="{E(news_today)} at 7:30, no entries"></div>'
             if news_today and lv.watch.news_alert else "")
-    ticks = "".join(f'<span style="left:{x(h * 100):.1f}%">{h if h <= 12 else h - 12}{"am" if h < 12 else "pm"}</span>' for h in range(6, 13))
+    hours = range(16, 29, 2) if night else range(6, 13)
+    ticks = "".join(f'<span style="left:{x((h % 24) * 100):.1f}%">{(h % 12) or 12}{"am" if h % 24 < 12 else "pm"}</span>' for h in hours)
+    recent = now.timestamp() * 1000 - 14 * 3600_000
     trades = "".join(
         f'<div class="tl-trade {"long" if t.direction > 0 else "short"}" style="left:{x(_dt(t.signal_time).hour * 100 + _dt(t.signal_time).minute):.1f}%" title="{"Long" if t.direction > 0 else "Short"} signal {_clock(t.signal_time + lv.book.bar_ms)}"></div>'
-        for t in lv.res.trades if _dt(t.signal_time).date() == now.date()
+        for t in lv.res.trades if (t.signal_time >= recent if night else _dt(t.signal_time).date() == now.date())
     )
+    if night:
+        news_today = None
     return f"""<div class="tl">
   <div class="tl-track"><div class="tl-win" style="left:{x(a):.1f}%;width:{x(b) - x(a):.1f}%"></div>{news}{trades}{marker}</div>
   <div class="tl-ticks">{ticks}</div>
-  <p class="tl-cap">Entry window {_window(lv)}{f'. {E(news_today)} at 7:30: no entries 7–8' if news_today and lv.watch.news_alert else ''}</p>
+  <p class="tl-cap">Entry window {_window(lv)}{' (overnight)' if night else ''}{f'. {E(news_today)} at 7:30: no entries 7–8' if news_today and lv.watch.news_alert else ''}</p>
 </div>"""
 
 
@@ -232,16 +239,20 @@ def _trades(lv) -> str:
         + (f'<div><b class="{"up" if net >= 0 else "down"}">{_usd(net * first[1])}</b><span>per {E(first[0])}</span></div>' if first else "")
         + "</div>"
     )
-    rows = "".join(
+    def row(t):
+        return (
         f'<tr><td>{_day(t.signal_time)}<small>{_clock(t.signal_time + lv.book.bar_ms)}</small></td>'
         f'<td><span class="tag {"long" if t.direction > 0 else "short"}">{"Long" if t.direction > 0 else "Short"}</span></td>'
         f'<td class="num">{_px(t.entry_price or t.signal_close)}</td><td class="num">{_px(t.exit_price)}</td>'
         f'<td>{E({"target": "Target", "stop": "Stop", "time": "Time exit"}.get(t.exit_reason or "", "Open"))}</td>'
-        f'<td class="num {"up" if (t.points or 0) > 0 else "down" if t.points is not None else ""}">{"" if t.points is None else f"{t.points:+.2f}"}</td></tr>'
-        for t in reversed(res.trades[-12:])
-    )
+        f'<td class="num {"up" if (t.points or 0) > 0 else "down" if t.points is not None else ""}">{"" if t.points is None else f"{t.points:+.2f}"}</td></tr>')
+
+    recent = list(reversed(res.trades[-12:]))
+    head = '<thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th></tr></thead>'
+    more = (f'<details class="more"><summary>Show {len(recent) - 4} older trade{'s' if len(recent) > 5 else ''}</summary><table class="tt">{head}<tbody>'
+            + "".join(row(t) for t in recent[4:]) + '</tbody></table></details>') if len(recent) > 4 else ""
     return f"""<h3>Last {days} days</h3>{summary}
-<table class="tt"><thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th></tr></thead><tbody>{rows}</tbody></table>"""
+<table class="tt">{head}<tbody>{"".join(row(t) for t in recent[:4])}</tbody></table>{more}"""
 
 
 def _watch(lv, nd) -> str:
@@ -250,7 +261,8 @@ def _watch(lv, nd) -> str:
     if lv.res is None or not bars:
         return f'<section class="watch"><h2>{E(w.name.title())}</h2><p class="muted">Waiting for market data.</p></section>'
     last = bars[-1]
-    news_today = nd.get(datetime.now(CHICAGO).date())
+    now_ct = datetime.now(CHICAGO)
+    news_today = nd.get(now_ct.date()) if now_ct.hour < 8 else None  # the 7:00-8:00 block is over after 8
     return f"""<section class="watch">
   <header class="wh"><h2>{E(w.name.title())}{' <span class="paper">paper</span>' if w.paper else ''}</h2><p>{E(lv.symbol)} on {E(w.interval)} bars, strategy {E(w.strategy.replace('_', ' '))}</p></header>
   <div class="cols">
@@ -341,7 +353,8 @@ details summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .trades{margin-top:22px;border-top:1px solid var(--line);padding-top:16px}
 .tsum{display:flex;flex-wrap:wrap;gap:8px 28px;margin-bottom:10px}
 .tsum div{display:flex;flex-direction:column}.tsum b{font:600 22px/1.1 "Archivo",sans-serif;font-stretch:112%}.tsum span{font-size:12px;color:var(--soft)}
-.tt{width:100%;border-collapse:collapse;font-size:14px}
+.tt{width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed}.tt th:nth-child(1){width:22%}.tt th:nth-child(2){width:14%}.tt th:nth-child(3),.tt th:nth-child(4){width:17%}.tt th:nth-child(5){width:15%}.tt th:nth-child(6){width:15%}
+.quiet{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border:1px solid var(--line);border-radius:14px;padding:12px 18px;background:var(--paper)}.q-word{font-weight:800;color:var(--soft);margin-right:6px;font-stretch:110%;letter-spacing:.02em;text-transform:uppercase;font-size:13px}.chip{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px;color:var(--soft)}.chip b{color:var(--ink);font-weight:700}.chip.on{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 10%,transparent)}
 .tt th{font-weight:500;color:var(--soft);font-size:12px;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
 .tt td{padding:7px 8px;border-bottom:1px solid var(--line)}.tt td:first-child{white-space:nowrap}.tt small{display:block;color:var(--soft);font-size:12px}
 .num{text-align:right!important}
@@ -449,12 +462,8 @@ def _action(lv) -> str:
   <div class="act-body"><p class="act-head">{name}: {why}, {last.points:+.2f} pts</p>
   <p>{'Close the position now on Robinhood.' if last.exit_reason == 'time' else 'Your stop or limit should have filled. Check Robinhood and cancel the other order.'}</p></div></div>"""
     inwin = _in_window(lv, now)
-    if inwin:
-        sub = f"Watching for a setup until {_window(lv).split(' and ')[1]}. Nothing to do yet."
-    else:
-        sub = f"Flat. Next chance between {_window(lv)} on the next trading day." if inwin is False else "Flat. Nothing to do."
-    return f"""<div class="act none"><p class="act-word">NO ACTION</p>
-  <div class="act-body"><p class="act-head">{name}</p><p>{sub}</p></div></div>"""
+    sub = "watching now" if inwin else f"trades {_window(lv).replace(' and ', '–')}"
+    return f'<span class="chip{" on" if inwin else ""}"><b>{E(lv.watch.name.title())}</b>{" · paper" if lv.watch.paper else ""} · {sub}</span>'
 
 
 def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool) -> str:
@@ -472,7 +481,10 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
         newsbar = ""
     watches = "".join(_watch(lv, nd) for lv in lives)
     acts = [_action(lv) for lv in lives if lv.res]
-    flash_html = f'<div class="acts">{"".join(acts)}</div>'
+    big = [a for a in acts if not a.startswith('<span class="chip')]
+    chips = [a for a in acts if a.startswith('<span class="chip')]
+    quiet = (f'<div class="quiet"><span class="q-word">No action now</span>{"".join(chips)}</div>' if chips else "")
+    flash_html = f'<div class="acts">{"".join(big)}{quiet}</div>'
     title = "Signal Desk"
     for lv, a in zip([lv for lv in lives if lv.res], acts):
         if 'class="act flash' in a:
