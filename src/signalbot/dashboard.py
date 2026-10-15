@@ -188,7 +188,7 @@ def _checks(lv, nd) -> str:
             out.append('<div class="plain">' + "".join(
                 f'<p class="kv{" go" if hot else ""}"><span>{E(lab)}</span><b>{E(txt)}</b></p>' for lab, txt, hot in plain) + '</div>')
         if brows:
-            out.append('<details class="more"><summary>Show the details</summary>')
+            out.append(f'<details class="more" data-key="d:{E(lv.watch.name)}"><summary>Show the details</summary>')
     if brows:
         names = [str(r[0]) for r in brows]
         if live_bar is not None:
@@ -250,7 +250,7 @@ def _trades(lv) -> str:
     recent = list(reversed(res.trades[-12:]))
     head = '<thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th></tr></thead>'
     plural = "trades" if len(recent) > 5 else "trade"
-    more = (f'<details class="more"><summary>Show {len(recent) - 4} older {plural}</summary><table class="tt">{head}<tbody>'
+    more = (f'<details class="more" data-key="o:{E(lv.watch.name)}"><summary>Show {len(recent) - 4} older {plural}</summary><table class="tt">{head}<tbody>'
             + "".join(row(t) for t in recent[4:]) + '</tbody></table></details>') if len(recent) > 4 else ""
     return f"""<h3>Last {days} days</h3>{summary}
 <table class="tt">{head}<tbody>{"".join(row(t) for t in recent[:4])}</tbody></table>{more}"""
@@ -264,27 +264,51 @@ def _watch(lv, nd) -> str:
     last = bars[-1]
     now_ct = datetime.now(CHICAGO)
     news_today = nd.get(now_ct.date()) if now_ct.hour < 8 else None  # the 7:00-8:00 block is over after 8
-    return f"""<section class="watch">
-  <header class="wh"><h2>{E(w.name.title())}{' <span class="paper">paper</span>' if w.paper else ''}</h2><p>{E(lv.symbol)} on {E(w.interval)} bars, strategy {E(w.strategy.replace('_', ' '))}</p></header>
+    t = lv.res.open_trade
+    inwin = _in_window(lv, now_ct)
+    live_px, _ = _live(lv)
+    px = live_px if live_px is not None else last.close
+    last_t = lv.res.trades[-1] if lv.res.trades else None
+    fresh_exit = bool(last_t and last_t.exit_time and time.time() * 1000 - (last_t.exit_time + lv.book.bar_ms) <= FRESH_MIN * 60_000)
+    if t:
+        state, cls = f"{'Long' if t.direction > 0 else 'Short'} since {_clock(t.signal_time + lv.book.bar_ms)}", "long" if t.direction > 0 else "short"
+    elif inwin:
+        state, cls = "Watching now", "on"
+    else:
+        state, cls = f"Next window {_window(lv).replace(' and ', '–')}", ""
+    is_open = bool(t or inwin or fresh_exit)
+    force = ' data-force="1"' if t and time.time() * 1000 - (t.signal_time + lv.book.bar_ms) <= FRESH_MIN * 60_000 else ""
+    key = f"w:{w.name}:{'open' if is_open else 'shut'}"
+    return f"""<details class="watch {cls}" data-key="{E(key)}"{force}{' open' if is_open else ''}>
+  <summary class="wh"><span class="w-name">{E(w.name.title())}{' <span class="paper">paper</span>' if w.paper else ''}</span>
+    <span class="w-state {cls}">{E(state)}</span><span class="w-px">{_px(px)}</span><span class="chev" aria-hidden="true"></span></summary>
+  <div class="w-body">
+  <p class="w-meta">{E(lv.symbol)} on {E(w.interval)} bars, strategy {E(w.strategy.replace('_', ' '))}</p>
   <div class="cols">
     <div class="col-a">{_position(lv, last)}{_timeline(lv, news_today)}</div>
     <div class="col-b"><h3>Ready to enter?</h3>{_checks(lv, nd)}</div>
   </div>
   <div class="trades">{_trades(lv)}</div>
-</section>"""
+  </div>
+</details>"""
 
 
 def _alerts(alerts: list[dict]) -> str:
     if not alerts:
         return '<p class="muted">Nothing sent yet. Trade signals, exits, news-day warnings and the 7:15 check-in will show here.</p>'
-    items = []
+    today, earlier = [], []
     for a in reversed(alerts[-25:]):
         body = E(a["body"]).replace("\n", "<br>")
-        items.append(
+        is_today = _day(a["t"]) == "Today"
+        (today if is_today else earlier).append(
             f'<li class="al {E(a.get("kind", "info"))}"><time>{_day(a["t"])}<br>{_clock(a["t"])}</time>'
-            f'<details{" open" if a.get("kind") in ("entry", "exit") else ""}><summary>{E(a["title"])}</summary><p>{body}</p></details></li>'
+            f'<details{" open" if is_today and a.get("kind") in ("entry", "exit") else ""}><summary>{E(a["title"])}</summary><p>{body}</p></details></li>'
         )
-    return f'<ol class="alerts">{"".join(items)}</ol>'
+    out = f'<ol class="alerts">{"".join(today)}</ol>' if today else '<p class="muted">Nothing sent today.</p>'
+    if earlier:
+        out += (f'<details class="earlier" data-key="alerts-earlier"><summary>Earlier ({len(earlier)})</summary>'
+                f'<ol class="alerts">{"".join(earlier)}</ol></details>')
+    return out
 
 
 CSS = """
@@ -394,6 +418,64 @@ h4{margin:12px 0 8px;font-size:13px;font-weight:600}h4 span{color:var(--soft);fo
 @media (prefers-reduced-motion:no-preference){.sigbtn.flash{animation:flash 1s steps(2,jump-none) infinite alternate}.ready-badge{animation:ready 1.4s ease-in-out infinite}@keyframes ready{0%,100%{opacity:1}50%{opacity:.35}}}
 @media (prefers-reduced-motion:no-preference){.lv-now::before{animation:pulse 2.4s ease-out infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--gold) 55%,transparent)}100%{box-shadow:0 0 0 9px transparent}}}
+/* ---- 2026 refresh: steel + gold, collapsible panels ---- */
+:root{--bg:#e8ebef;--paper:#f8f9fb;--raise:#ffffff;--ink:#141a21;--soft:#5a6472;--line:#d5dbe3;--gold:#a7802a;--gold-2:#ecdcae;
+--up:#1d8656;--down:#c0402c;--up-bg:#e1f2e8;--down-bg:#f8e4de;--news:#d9b14f;--shadow:0 1px 2px rgba(20,26,33,.06),0 8px 24px -12px rgba(20,26,33,.18)}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1217;--paper:#161b22;--raise:#1c222b;--ink:#e6e9ee;--soft:#8c96a5;--line:#262e39;--gold:#d8b45c;--gold-2:#3d3420;
+--up:#4fc489;--down:#f0775f;--up-bg:#14301f;--down-bg:#3a1d17;--news:#b18f3a;--shadow:0 1px 0 rgba(255,255,255,.03),0 10px 30px -14px rgba(0,0,0,.7)}}
+body{font-size:15px;line-height:1.5}
+.wrap{max-width:1100px;padding:0 20px 56px}
+.top{position:sticky;top:0;z-index:20;margin:0 -20px 18px;padding:14px 20px;background:color-mix(in srgb,var(--bg) 84%,transparent);
+  -webkit-backdrop-filter:saturate(1.4) blur(12px);backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent);align-items:center}
+.top h1{font-size:22px;font-stretch:125%;letter-spacing:-.015em;display:flex;align-items:center;gap:10px}
+.top h1::before{content:"";width:14px;height:22px;border-radius:3px;background:linear-gradient(160deg,#f3dc95,var(--gold) 55%,#7a5a17);box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+.status>span{background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.acts{gap:10px;margin-bottom:14px}
+.act{border-radius:18px;box-shadow:var(--shadow);background:var(--raise)}
+.quiet{border-radius:16px;background:var(--raise);box-shadow:var(--shadow);padding:10px 14px;gap:8px}
+.q-word{text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);font-weight:700;font-stretch:112%}
+.chip{background:var(--paper);font-size:13px}.chip b{margin-right:2px}
+.chip.on{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,var(--paper));color:var(--ink)}
+.chip.on::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gold);margin-right:7px;vertical-align:1px}
+.newsbar{border-radius:14px;border-left-width:4px;background:var(--raise);box-shadow:var(--shadow);margin-bottom:14px}
+details.watch{display:block;background:var(--raise);border:1px solid var(--line);border-radius:20px;margin-bottom:14px;padding:0;box-shadow:var(--shadow);overflow:hidden}
+details.watch.on{border-color:color-mix(in srgb,var(--gold) 55%,var(--line))}
+details.watch.long{border-color:color-mix(in srgb,var(--up) 50%,var(--line))}details.watch.short{border-color:color-mix(in srgb,var(--down) 50%,var(--line))}
+details.watch>summary{list-style:none;display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto 22px;align-items:center;gap:14px;
+  padding:16px 22px;margin:0;cursor:pointer;color:var(--ink);font-size:15px}
+details.watch>summary::-webkit-details-marker{display:none}
+details.watch>summary:hover{background:color-mix(in srgb,var(--paper) 60%,transparent)}
+details.watch>summary:focus-visible{outline:2px solid var(--gold);outline-offset:-4px;border-radius:20px}
+.w-name{font:700 20px/1.1 "Archivo",sans-serif;font-stretch:118%;white-space:nowrap}
+.w-state{justify-self:start;font-size:13px;color:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px 11px;background:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.w-state.on{color:var(--ink);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,var(--paper))}
+.w-state.long{color:var(--up);border-color:var(--up);background:var(--up-bg)}.w-state.short{color:var(--down);border-color:var(--down);background:var(--down-bg)}
+.w-px{font:650 20px/1 "Archivo",sans-serif;font-stretch:125%;letter-spacing:-.01em}
+.chev{width:10px;height:10px;border-right:2px solid var(--soft);border-bottom:2px solid var(--soft);transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s ease;justify-self:center}
+details.watch[open]>summary .chev{transform:rotate(225deg) translate(-2px,-2px)}
+details.watch[open]>summary{border-bottom:1px solid var(--line)}
+.w-body{padding:16px 22px 20px}
+.w-meta{margin:0 0 14px;color:var(--soft);font-size:13px}
+.pos{border-radius:16px;background:var(--paper)}
+.pos.flat .price{font-stretch:125%;font-size:46px;background:linear-gradient(180deg,var(--ink) 55%,color-mix(in srgb,var(--ink) 55%,var(--gold)));-webkit-background-clip:text;background-clip:text;color:transparent}
+.tl-track{height:14px;border-radius:999px}.tl-win{border-radius:999px}
+.trades{border-top:1px solid var(--line)}
+.tt td,.tt th{padding-left:10px;padding-right:10px}
+.tt tbody tr:hover{background:color-mix(in srgb,var(--paper) 70%,transparent)}
+.panel{background:var(--raise);border-radius:20px;box-shadow:var(--shadow)}
+details.earlier>summary{cursor:pointer;color:var(--soft);font-size:14px;margin:10px 0 0;font-weight:600}
+details.more>summary,details.earlier>summary{list-style:none}
+details.more>summary::before,details.earlier>summary::before{content:"";display:inline-block;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin-right:9px;vertical-align:2px;transition:transform .2s ease}
+details.more[open]>summary::before,details.earlier[open]>summary::before{transform:rotate(45deg)}
+details.more>summary::-webkit-details-marker,details.earlier>summary::-webkit-details-marker{display:none}
+.sigbtn,.ready-badge{box-shadow:var(--shadow)}
+.foot{text-align:center}
+@media (max-width:560px){details.watch>summary{grid-template-columns:minmax(0,1fr) auto 18px;gap:8px 10px;padding:14px 16px}
+  .w-state{grid-column:1/-1;grid-row:2;justify-self:start}.w-name{font-size:18px}.w-px{font-size:17px}.w-body{padding:14px 16px 18px}
+  .top{flex-direction:column;align-items:flex-start;gap:8px}}
+.al details>summary{list-style:none}.al details>summary::-webkit-details-marker{display:none}.al details>summary::before{content:"";display:inline-block;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin-right:9px;vertical-align:2px;transition:transform .2s ease}.al details[open]>summary::before{transform:rotate(45deg)}
+@media (max-width:560px){.status>span:last-child{display:none}.top h1{font-size:19px}}
+@media (prefers-reduced-motion:reduce){.al details>summary::before,.chev,details.more>summary::before,details.earlier>summary::before{transition:none}}
 """
 
 
@@ -463,8 +545,8 @@ def _action(lv) -> str:
   <div class="act-body"><p class="act-head">{name}: {why}, {last.points:+.2f} pts</p>
   <p>{'Close the position now on Robinhood.' if last.exit_reason == 'time' else 'Your stop or limit should have filled. Check Robinhood and cancel the other order.'}</p></div></div>"""
     inwin = _in_window(lv, now)
-    sub = "watching now" if inwin else f"trades {_window(lv).replace(' and ', '–')}"
-    return f'<span class="chip{" on" if inwin else ""}"><b>{E(lv.watch.name.title())}</b>{" · paper" if lv.watch.paper else ""} · {sub}</span>'
+    sub = "watching now" if inwin else _window(lv).replace(' and ', '–').replace(' CT', '')
+    return f'<span class="chip{" on" if inwin else ""}"><b>{E(lv.watch.name.title())}</b> {sub}</span>'
 
 
 def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool) -> str:
@@ -494,11 +576,11 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
     now = time.time()
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="15"><title>{E(title)}</title>
+<noscript><meta http-equiv="refresh" content="15"></noscript><title>{E(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..700&display=swap" rel="stylesheet">
 <style>{CSS}</style></head><body><div class="wrap">
-<header class="top"><h1>Signal <em>Desk</em></h1>
+<header class="top"><h1>Signal Desk</h1>
 <p class="status"><span><span class="dot{' on' if mkt_open else ''}"></span>Market {'open' if mkt_open else 'closed'}</span>
 <span id="upd" data-t="{int(now)}">Updated {_clock(now)} CT</span><span>Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)}</span></p></header>
 {flash_html}{newsbar}{watches}
@@ -508,7 +590,7 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 <script>
 (function(){{var e=document.getElementById('upd');var t=+e.dataset.t;setInterval(function(){{var m=Math.floor((Date.now()/1000-t)/60);
 if(m>=3){{e.textContent='Not updated for '+m+' min: the bot may have stopped';e.className='stale';}}}},20000);
-if(document.querySelector('.act.flash')){{var base=document.title,on=false;setInterval(function(){{on=!on;document.title=on?'🔔 '+base:base;}},900);}}}})();
+if(document.querySelector('.act.flash')){{var base=document.title,on=false;setInterval(function(){{on=!on;document.title=on?'🔔 '+base:base;}},900);}}function g(k){{try{{return localStorage.getItem(k)}}catch(x){{return null}}}}function st(k,v){{try{{localStorage.setItem(k,v)}}catch(x){{}}}}document.querySelectorAll('details[data-key]').forEach(function(d){{var k='sd:'+d.dataset.key,v=g(k);if(d.dataset.force==='1'){{d.open=true}}else if(v!==null){{d.open=v==='1'}}d.addEventListener('toggle',function(){{st(k,d.open?'1':'0')}})}});try{{var y=sessionStorage.getItem('sd:y');if(y!==null)window.scrollTo(0,+y)}}catch(x){{}}setTimeout(function(){{try{{sessionStorage.setItem('sd:y',String(window.scrollY))}}catch(x){{}}location.reload()}},15000);}})();
 </script></body></html>"""
 
 
