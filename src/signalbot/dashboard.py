@@ -169,10 +169,17 @@ def _checks(lv, nd) -> str:
     out = []
     _, live_bar = _live(lv)
     plain = lv.strategy.summary(closed, ctx, live_bar)
+    sig = _signal_button(lv)
+    if sig:
+        out.append(sig)
+    elif any(hot for _, _, hot in plain):
+        side = "SELL" if any(hot and lab.startswith("SELL") for lab, _, hot in plain) else "BUY"
+        out.append(f'<p class="ready-badge {side.lower()}">GET READY · {side} possible</p>')
     if plain:
-        out.append('<div class="plain">' + "".join(
-            f'<p class="kv{" go" if hot else ""}"><span>{E(lab)}</span><b>{E(txt)}</b></p>' for lab, txt, hot in plain) + '</div>')
         other = []
+        if not sig:
+            out.append('<div class="plain">' + "".join(
+                f'<p class="kv{" go" if hot else ""}"><span>{E(lab)}</span><b>{E(txt)}</b></p>' for lab, txt, hot in plain) + '</div>')
         if brows:
             out.append('<details class="more"><summary>Show the details</summary>')
     if brows:
@@ -369,12 +376,32 @@ h4{margin:12px 0 8px;font-size:13px;font-weight:600}h4 span{color:var(--soft);fo
 @keyframes flash{from{background:var(--fl);box-shadow:0 0 0 0 transparent}to{background:color-mix(in srgb,var(--fl) 55%,var(--gold));box-shadow:0 0 0 6px color-mix(in srgb,var(--gold) 45%,transparent)}}}
 
 .foot{color:var(--soft);font-size:12px;margin-top:20px}
+.sigbtn{display:flex;flex-direction:column;align-items:center;gap:4px;border-radius:14px;padding:16px 14px;margin:0 0 12px;color:#fff;text-align:center}.sigbtn.buy{background:var(--up);--fl:var(--up)}.sigbtn.sell{background:var(--down);--fl:var(--down)}.sigbtn .sb-word{font:800 34px/1 "Archivo",sans-serif;font-stretch:120%;letter-spacing:.02em}.sigbtn .sb-lv{font-weight:700;font-size:15px}.sigbtn .sb-sm{font-size:12px;opacity:.9}.sigbtn.hold{background:var(--paper);color:var(--ink);border:2px solid var(--fl)}.sigbtn.hold .sb-word{color:var(--fl);font-size:26px}.ready-badge{display:inline-block;margin:0 0 10px;padding:6px 14px;border-radius:999px;font-weight:800;font-size:14px;letter-spacing:.03em;border:2px solid var(--up);color:var(--up)}.ready-badge.sell{border-color:var(--down);color:var(--down)}
+@media (prefers-reduced-motion:no-preference){.sigbtn.flash{animation:flash 1s steps(2,jump-none) infinite alternate}.ready-badge{animation:ready 1.4s ease-in-out infinite}@keyframes ready{0%,100%{opacity:1}50%{opacity:.35}}}
 @media (prefers-reduced-motion:no-preference){.lv-now::before{animation:pulse 2.4s ease-out infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--gold) 55%,transparent)}100%{box-shadow:0 0 0 9px transparent}}}
 """
 
 
 FRESH_MIN = 30  # a new entry signal flashes at the top of the page for this many minutes
+
+
+def _signal_button(lv) -> str:
+    """Blinking BUY / SELL button in the watch panel while a new signal is fresh; HOLD while in a trade."""
+    t = lv.res.open_trade if lv.res else None
+    if not t:
+        return ""
+    fired = t.signal_time + lv.book.bar_ms
+    buy = t.direction > 0
+    side = "BUY" if buy else "SELL"
+    mins = max(0, int((time.time() * 1000 - fired) // 60_000))
+    levels = f"Entry {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}"
+    if mins <= FRESH_MIN:
+        ago = "just now" if mins < 2 else f"{mins} min ago"
+        return (f'<div class="sigbtn flash {side.lower()}" role="alert"><span class="sb-word">{side} NOW</span>'
+                f'<span class="sb-lv">{levels}</span><span class="sb-sm">signal {_clock(fired)} ({ago}) · don\'t enter if price ran far past entry</span></div>')
+    return (f'<div class="sigbtn hold {side.lower()}"><span class="sb-word">HOLD {"LONG" if buy else "SHORT"}</span>'
+            f'<span class="sb-lv">{levels}</span><span class="sb-sm">only if you took it · no new entry until it closes</span></div>')
 
 
 def _in_window(lv, now: datetime) -> bool | None:
