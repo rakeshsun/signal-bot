@@ -189,20 +189,18 @@ class BosPullback(Strategy):
         mins = int((bars[-1].time - bars[-2].time) / 60000) if len(bars) > 1 else 3
         rows: list[ChecklistRow] = []
         if not active:
-            rows.append(("Status", "No setup. Waiting for gold to break a recent high (buy) or low (sell).", None))
-        for s in active[-2:]:
-            buy = s.d == 1
-            kind = "BUY setup" if buy else "SELL setup"
-            cancel = s.ref - p.invalid_ticks * p.tick if buy else s.ref + p.invalid_ticks * p.tick
-            if s.stage == 1:
-                wait = max(0, p.min_clean - s.clean)
-                when = f" (not in the next {wait * mins} min)" if wait else ""
-                rows.append((f"{kind}: step 1 of 2",
-                             f"Gold broke {'above' if buy else 'below'} {s.ref:,.1f}. Now {now:,.1f}. "
-                             f"Waiting for it to come back to {s.ref:,.1f}{when}.", None))
-            else:
-                rows.append((f"{kind}: step 2 of 2",
-                             f"Pulled back to {s.ref:,.1f}. {'BUY' if buy else 'SELL'} if a {mins}-min bar closes "
-                             f"{'above' if buy else 'below'} {s.ext:,.1f}. Now {now:,.1f}.", True))
-            rows.append(("Cancelled if", f"a bar closes {'below' if buy else 'above'} {cancel:,.1f}", None))
+            return [("What to do", "Nothing. No setup right now.", None)]
+        s = active[-1]  # the newest setup is the one that matters
+        buy = s.d == 1
+        side = "BUY" if buy else "SELL"
+        cancel = s.ref - p.invalid_ticks * p.tick if buy else s.ref + p.invalid_ticks * p.tick
+        if s.stage == 1:
+            rows.append(("What to do", "Nothing yet. Just wait.", None))
+            rows.append((f"{side} alert comes if",
+                         f"gold {'drops' if buy else 'rises'} back to {s.ref:,.1f}, then {'climbs above' if buy else 'falls below'} "
+                         f"{s.ext:,.1f} (gold is {now:,.1f} now)", None))
+        else:
+            rows.append(("What to do", f"Get ready. A {side} alert may come soon.", True))
+            rows.append((f"{side} alert comes if", f"a {mins}-min bar closes {'above' if buy else 'below'} {s.ext:,.1f} (gold is {now:,.1f} now)", True))
+        rows.append(("Setup is off if", f"gold closes {'below' if buy else 'above'} {cancel:,.1f}", None))
         return rows
