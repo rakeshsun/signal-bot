@@ -390,6 +390,8 @@ h2,h3,h4{margin:0}
 .ri.on .ri-dot{background:var(--gold);box-shadow:0 0 0 3px var(--gold-2)}.ri.long .ri-dot{background:var(--up)}.ri.short .ri-dot{background:var(--down)}.ri.exit .ri-dot{background:var(--soft)}
 .ri.on .ri-sub{color:var(--gold-ink)}
 .rn{margin:0;padding:3px 10px;font-size:13px;color:var(--soft)}.rn b{color:var(--ink);font-weight:600}.rn-t{color:var(--gold-ink);font-weight:600}.rn.warn{color:var(--ink);background:color-mix(in srgb,var(--down) 12%,transparent);border-radius:8px;padding:8px 10px}
+.nl{text-decoration:none;color:inherit;border-bottom:1px dotted var(--faint)}.nl:hover{color:var(--gold-ink);border-bottom-color:var(--gold)}
+.nl::after{content:" ↗";font-size:10px;color:var(--faint)}
 .rn.hot{color:var(--ink);background:color-mix(in srgb,var(--news) 16%,transparent);border-radius:8px;padding:8px 10px}
 
 /* hero */
@@ -790,6 +792,15 @@ def _trades_json(lives) -> str:
     return json.dumps(rows).replace("</", "<\\/")
 
 
+def _ff(d) -> str:
+    """ForexFactory calendar page for one day (times, forecasts and actual numbers)."""
+    return f"https://www.forexfactory.com/calendar?day={d:%b}{d.day}.{d.year}".lower()
+
+
+def _nl(d, text: str) -> str:
+    return f'<a class="nl" href="{_ff(d)}" target="_blank" rel="noopener" title="Open the calendar for this day: forecast vs actual">{text}</a>'
+
+
 def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     items = []
     for lv in lives:
@@ -798,9 +809,9 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
         items.append(f'<a class="ri {cls}" href="#{slug}"><span class="ri-dot"></span><span class="ri-name">{E(lv.watch.name.title())}'
                      f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}{_opens_in(lv, now_ct) if cls == "off" else ""}</span></a>')
     if news_today:
-        news = f'<p class="rn hot"><b>{E(news_today)} today, 7:30 CT.</b> Gold takes no new entries 7:00–8:00.</p>'
+        news = f'<p class="rn hot"><b>{_nl(now_ct.date(), E(news_today) + " today, 7:30 CT")}.</b> Gold takes no new entries 7:00–8:00.</p>'
     elif upcoming:
-        news = "".join(f'<p class="rn"><b>{E(n)}</b> {d:%a %b %-d}</p>' for d, n in upcoming[:3])
+        news = "".join(f'<p class="rn">{_nl(d, f"<b>{E(n)}</b> {d:%a %b %-d}")}</p>' for d, n in upcoming[:3])
     else:
         news = '<p class="rn muted">None scheduled</p>'
     other = ""
@@ -822,7 +833,7 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
         by_time: dict = {}
         for t, n in evs:
             by_time.setdefault(t, []).append(n)
-        lines = "".join(f'<span class="rn-t">{E(t)}</span> {E(", ".join(ns))}<br>' for t, ns in by_time.items())
+        lines = "".join(_nl(d, f'<span class="rn-t">{E(t)}</span> {E(", ".join(ns))}') + "<br>" for t, ns in by_time.items())
         other += f'<p class="rn{" warn" if d == now_ct.date() else ""}"><b>{when}</b><br>{lines}</p>'
     other_html = (f'<h2 class="rail-h2">Other big news</h2>{other}<p class="rn muted small">Not blocked: signals still fire. Gold can spike at these times.</p>'
                   if other else "")
