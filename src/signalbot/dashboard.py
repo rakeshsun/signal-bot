@@ -536,14 +536,14 @@ def _signal_button(lv) -> str:
         return ""
     fired = t.signal_time + lv.book.bar_ms
     buy = t.direction > 0
-    side = "BUY" if buy else "SELL"
+    side = ("PAPER " if lv.watch.paper else "") + ("BUY" if buy else "SELL")
     mins = max(0, int((time.time() * 1000 - fired) // 60_000))
     levels = f"Entry {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}"
     if mins <= FRESH_MIN:
         ago = "just now" if mins < 2 else f"{mins} min ago"
-        return (f'<div class="sigbtn flash {side.lower()}" role="alert"><span class="sb-word">{side} NOW</span>'
+        return (f'<div class="sigbtn flash {"buy" if buy else "sell"}" role="alert"><span class="sb-word">{side} NOW</span>'
                 f'<span class="sb-lv">{levels}</span><span class="sb-sm">signal {_clock(fired)} ({ago}) · don\'t enter if price ran far past entry</span></div>')
-    return (f'<div class="sigbtn hold {side.lower()}"><span class="sb-word">HOLD {"LONG" if buy else "SHORT"}</span>'
+    return (f'<div class="sigbtn hold {"buy" if buy else "sell"}"><span class="sb-word">HOLD {"LONG" if buy else "SHORT"}</span>'
             f'<span class="sb-lv">{levels}</span><span class="sb-sm">only if you took it · no new entry until it closes</span></div>')
 
 

@@ -85,7 +85,18 @@ class BosPullback(Strategy):
         return (a <= t < b) if a <= b else (t >= a or t < b)
 
     def _run(self, bars: list[Bar]):
-        """Returns (events per bar, active setups at the end). event = (dir, pull, ext) on a BOS bar."""
+        """Returns (events per bar, active setups at the end). event = (dir, pull, ext) on a BOS bar.
+        Cached on the bar list's identity (length + first/last bar), because the dashboard asks for
+        the same answer several times per refresh."""
+        key = (len(bars), bars[0].time, bars[-1].time, bars[-1].close) if bars else None
+        cache = getattr(self, "_run_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        result = self._run_uncached(bars)
+        self._run_cache = (key, result)
+        return result
+
+    def _run_uncached(self, bars: list[Bar]):
         p = self.p
         n = len(bars)
         h = [b.high for b in bars]
