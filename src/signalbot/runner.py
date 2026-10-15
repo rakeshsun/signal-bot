@@ -205,13 +205,7 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
     nd, info = await asyncio.to_thread(news_calendar, s, True)
     nd_on = datetime.now(CHICAGO).date()
 
-    lives = [await _start_watch(s, session, w) for w in watches]
-    for lv in lives:
-        await _baseline(lv, nd, sent)
-    started = time.time()
-    log.info("started:\n%s", "\n\n".join(
-        messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd)))
-        for lv in lives))
+    # the web page comes up first, so it's reachable while history is still loading
     links: list[str] = []
     dport = s.dashboard_port if dashboard_path is not None else 0
     if dashboard_path is not None and dport > 0:
@@ -219,6 +213,12 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         links = server.start(dashboard_path, s.state_dir, dport, s.dashboard_lan, token)
         for u in links:
             log.info("dashboard web page: %s", u)
+    lives = [await _start_watch(s, session, w) for w in watches]
+    await asyncio.gather(*(_baseline(lv, nd, sent) for lv in lives))  # load history in parallel
+    started = time.time()
+    log.info("started:\n%s", "\n\n".join(
+        messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd)))
+        for lv in lives))
     if dashboard_path is not None:
         dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport, links)
         log.info("dashboard: %s", dashboard_path)
