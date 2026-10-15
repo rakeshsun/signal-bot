@@ -610,9 +610,18 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     else:
         news = '<p class="rn muted">None scheduled</p>'
     other = ""
-    blocked = {news_today} if news_today else set()
     for d in sorted(k for k in (info or {}) if k >= now_ct.date())[:3]:
-        evs = [(t, n) for t, n in info[d] if not any(b and b.split()[0].lower() in n.lower() for b in blocked)]
+        def upcoming_ev(t):
+            if d != now_ct.date():
+                return True
+            try:
+                tt = datetime.strptime(t, "%I:%M %p")
+            except ValueError:
+                return True
+            return tt.hour * 60 + tt.minute > now_ct.hour * 60 + now_ct.minute
+        # CPI / jobs reports already show under "News days"; past events today are dropped
+        evs = [(t, n) for t, n in info[d] if upcoming_ev(t)
+               and not any(k in n.lower() for k in ("cpi", "non-farm", "nonfarm", "nfp"))]
         if not evs:
             continue
         when = "Today" if d == now_ct.date() else ("Tomorrow" if (d - now_ct.date()).days == 1 else f"{d:%a %b %-d}")
