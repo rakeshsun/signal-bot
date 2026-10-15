@@ -70,6 +70,17 @@ def news_calendar(s: Settings, fetch: bool):
     return days, info
 
 
+def _dump_bars(path: Path, bars) -> None:
+    """The exact bars the bot evaluated (last ~600), so a signal can be replayed / compared later."""
+    try:
+        lines = ["time,open,high,low,close,volume"] + [f"{b.time // 1000},{b.open},{b.high},{b.low},{b.close},{b.volume:g}" for b in bars]
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("\n".join(lines) + "\n")
+        os.replace(tmp, path)
+    except Exception as exc:
+        log.debug("bar dump failed: %s", exc)
+
+
 def evaluate(strategy: Strategy, bars, ctx: Context) -> Result:
     return simulate(bars, strategy.signals(bars, ctx), flat_hhmm=getattr(strategy, "flat_hhmm", None))
 
@@ -262,6 +273,8 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
                 if bars[-1].time > lv.last_bar:
                     lv.last_bar = bars[-1].time
                     lv.res = evaluate(lv.strategy, bars, Context(lv.symbol, nd))
+                    if dashboard_path is not None:
+                        _dump_bars(dashboard_path.parent / f"bars-{lv.watch.name}.csv", bars[-600:])
                 if lv.res is None:
                     continue
                 n = len(lv.res.bars)
