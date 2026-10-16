@@ -188,3 +188,23 @@ def test_exit_alert_only_for_announced_trades(tmp_path):
     assert not entry_announced(sent, "gold", t)  # began and ended inside a data gap: stay quiet
     sent.add("gold|entry|123")
     assert entry_announced(sent, "gold", t) and not entry_announced(sent, "gold-bos", t)
+
+
+def test_size_sets_runner_contracts_and_alert_totals():
+    from signalbot import messages
+    from signalbot.engine import Result, Trade
+    from signalbot.runner import apply_size
+
+    B = strategies.get("bos_pullback")
+    for size, expect in ((1, 0.0), (2, 0.5), (3, 1 / 3), (4, 0.5)):
+        s = B(B.make_params({"runner": 0.5}))
+        apply_size(s, Watch(name="g", strategy="bos_pullback", size=size))
+        assert s.p.runner == expect
+    w = Watch(name="gold-bos", strategy="bos_pullback", contracts={"/MGC": 10, "/GC": 100}, size=4)
+    t = Trade(1, 0, 0, 4190.0, 4174.0, 4210.0, {}, 1, 4190.0, runner=0.5)
+    title, body = messages.entry(t, w, "/GCZ6", Result([]), 180_000)
+    assert title.startswith("BUY 4x 4,190.0") and "risk $640 total" in body and "2 exit at TP, 2 ride" in body
+    t.part_price = 4210.0
+    assert "2 /MGCZ26 closed +20.00 pts = +$400" in messages.partial(t, w, "/GCZ6")[1]
+    t.exit_price, t.exit_reason, t.exit_index = 4230.0, "choch", 9
+    assert "4 /MGCZ26: +$1,200 total" in messages.exit_(t, w, "/GCZ6")[1]

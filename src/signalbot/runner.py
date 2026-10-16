@@ -81,6 +81,19 @@ def _dump_bars(path: Path, bars) -> None:
         log.debug("bar dump failed: %s", exc)
 
 
+def apply_size(strat: Strategy, w: Watch) -> None:
+    """A runner needs at least 2 contracts. size 1 -> no runner (all exits at the target); otherwise
+    keep a whole number of contracts (4 x 0.5 -> 2 ride, 3 x 0.5 -> 1 rides) so the P&L matches."""
+    p = getattr(strat, "p", None)
+    if p is None or not getattr(p, "runner", 0):
+        return
+    if w.size < 2:
+        p.runner = 0.0
+    else:
+        keep = max(1, min(w.size - 1, int(w.size * p.runner)))
+        p.runner = keep / w.size
+
+
 def entry_announced(sent: SentLog, watch_name: str, trade) -> bool:
     """Was this trade's entry alerted (or part of the start-up baseline)? Exits of trades that were
     never announced, e.g. ones that began and ended inside a data gap, are not sent."""
@@ -178,6 +191,7 @@ async def _start_watch(s: Settings, session, w: Watch) -> Live:
 
     strat_cls = strategies.get(w.strategy)
     strat = strat_cls(strat_cls.make_params(w.params))
+    apply_size(strat, w)
     inst = await tt.resolve(session, w.symbol, w.product)
     book = tt.CandleBook(w.interval, keep_days=s.history_days + 10)
     task = asyncio.create_task(tt.stream_forever(session, inst, w.interval, s.history_days, book))

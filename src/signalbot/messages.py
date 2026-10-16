@@ -38,6 +38,13 @@ def contract_names(w: Watch, symbol: str) -> dict[str, float]:
     return {(name + suf if name.startswith("/") else name): ppt for name, ppt in w.contracts.items()}
 
 
+def sizing(w: Watch, symbol: str, runner: float = 0.0) -> tuple[str, float, int, int]:
+    """(contract you trade, $ per point, how many, how many ride as the runner)."""
+    first = next(iter(contract_names(w, symbol).items()), (symbol, 1.0))
+    keep = round(w.size * runner) if runner else 0
+    return first[0], first[1], w.size, keep
+
+
 def _money_lines(w: Watch, risk: float, reward: float, symbol: str = "") -> list[str]:
     return [f"{name}: risk {_usd(risk * ppt)} · reward {_usd(reward * ppt)}" for name, ppt in contract_names(w, symbol).items()]
 
@@ -48,24 +55,31 @@ def entry(t: Trade, w: Watch, symbol: str, res: Result, bar_ms: int) -> tuple[st
     closed_at = datetime.fromtimestamp((t.signal_time + bar_ms) / 1000, tz=CHICAGO).strftime("%I:%M %p CT")
     extra = " · ".join(f"{v}" for v in t.info.values())
     levels = f"{side} {_px(t.signal_close)} | SL {_px(t.stop)} | TP {_px(t.target)}"
+    unit, ppt, size, keep = sizing(w, symbol, t.runner)
+    if size > 1:
+        levels = f"{side} {size}x {_px(t.signal_close)} | SL {_px(t.stop)} | TP {_px(t.target)}"
     lines = [
         levels,
         *([f"Setup: {extra}"] if extra else []),
         f"Signal on the bar that closed {closed_at}, close {_px(t.signal_close)}",
         f"FROM YOUR FILL: stop {t.risk:.2f} pts {below}, target {t.reward:.2f} pts {above}",
         *_money_lines(w, t.risk, t.reward, symbol),
+        *([f"YOUR SIZE {size} {unit}: risk {_usd(t.risk * ppt * size)} total, target pays "
+           f"{_usd(t.reward * ppt * (size - keep))} on {size - keep}" + (f" (+ the {keep} that ride)" if keep else "")]
+          if size > 1 else []),
     ]
     wins, n = res.win_rate(t.direction)
     if n >= 5:
         lines.append(f"{'Longs' if t.direction > 0 else 'Shorts'} in the bot's history window: {wins}/{n} won")
     names = " or ".join(contract_names(w, symbol)) or symbol
-    if t.runner:
-        keep = f"{t.runner:.0%}"
-        lines.append(f"RUNNER TRADE: take {1 - t.runner:.0%} off at TP, let {keep} ride. E.g. 4 contracts: limit for 2 at TP, "
-                     f"stop for all 4. When TP fills, move the stop on the rest to your entry; the bot alerts EXIT RUNNER "
-                     f"when the trend breaks (change of character).")
-        lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, stop {t.risk:.2f} pts {below} your fill for the whole "
-                     f"position, limit {t.reward:.2f} pts {above} for the first part only. Signal only, not advice.")
+    if t.runner and keep:
+        lines.append(f"RUNNER TRADE: {size - keep} exit at TP, {keep} ride. When TP fills, move the stop on the {keep} left to your entry; "
+                     f"the bot alerts EXIT RUNNER when the trend breaks (change of character).")
+        lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {size} {unit}, stop {t.risk:.2f} pts {below} your fill for all {size}, "
+                     f"limit {t.reward:.2f} pts {above} for {size - keep} of them. Signal only, not advice.")
+    elif size > 1:
+        lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {size} {unit}, then right away place a stop "
+                     f"{t.risk:.2f} pts {below} and a limit {t.reward:.2f} pts {above} your fill price. Signal only, not advice.")
     else:
         lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, then right away place a stop "
                      f"{t.risk:.2f} pts {below} and a limit {t.reward:.2f} pts {above} your fill price. Signal only, not advice.")
@@ -78,10 +92,10 @@ def partial(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
     """Runner trades: the target took the first part off; the rest keeps going."""
     entry_px = t.entry_price or t.signal_close
     first = ((t.part_price or 0) - entry_px) * t.direction
-    money = " · ".join(f"{name} +{_usd(first * ppt)}" for name, ppt in contract_names(w, symbol).items())
-    body = (f"Target {_px(t.part_price or 0)} hit: the first {1 - t.runner:.0%} closed +{first:.2f} pts"
-            + (f" ({money} per contract)" if money else "") + ".\n"
-            + f"NOW: move the stop on the remaining {t.runner:.0%} to your entry ({_px(entry_px)}).\n"
+    unit, ppt, size, keep = sizing(w, symbol, t.runner)
+    done = size - keep
+    body = (f"Target {_px(t.part_price or 0)} hit: {done} {unit} closed +{first:.2f} pts = +{_usd(first * ppt * done)}.\n"
+            + f"NOW: move the stop on the {keep} left to your entry ({_px(entry_px)}).\n"
             + "Let it ride. The bot sends EXIT RUNNER when the trend breaks (change of character).")
     return f"{'PAPER ' if w.paper else ''}{symbol} {w.name}: TARGET HIT, move stop to entry {_px(entry_px)}", body
 
@@ -94,9 +108,11 @@ def exit_(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
     sign = "+" if pts >= 0 else "-"
     reason = {"target": "TARGET", "stop": "STOP", "time": "TIME EXIT"}.get(t.exit_reason or "", "EXIT")
     money = " · ".join(f"{name} {sign}{_usd(abs(pts) * ppt)}" for name, ppt in contract_names(w, symbol).items())
+    unit, ppt0, size, _ = sizing(w, symbol)
+    total = f"YOUR {size} {unit}: {sign}{_usd(abs(pts) * ppt0 * size)} total\n" if size > 1 else ""
     body = (
         f"{side} from {_px(t.entry_price or t.signal_close)} closed at {_px(t.exit_price or 0)} "
-        f"({sign}{abs(pts):.2f} pts)\n"
+        f"({sign}{abs(pts):.2f} pts)\n" + total
         + (f"{money} per contract (before costs)\n" if money else "")
         + ("Close your position now (end-of-day exit)." if t.exit_reason == "time"
            else "If your stop / limit orders were in place, the position should be closed. Check Robinhood and cancel the other order.")
@@ -110,10 +126,11 @@ def _runner_exit(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
     first = ((t.part_price or 0) - entry_px) * t.direction
     pts = t.points or 0.0
     sign = "+" if pts >= 0 else "-"
-    money = " · ".join(f"{name} {sign}{_usd(abs(pts) * ppt)}" for name, ppt in contract_names(w, symbol).items())
+    unit, ppt, size, keep = sizing(w, symbol, t.runner)
+    money = f"{size} {unit}: {sign}{_usd(abs(pts) * ppt * size)} total"
     if t.exit_reason == "choch":
         title = f"EXIT RUNNER NOW ~{_px(t.exit_price or 0)}"
-        act = "Close the remaining contracts at market now: the trend broke (change of character). No order is waiting for this exit."
+        act = f"Close the {keep} remaining {unit} at market now: the trend broke (change of character). No order is waiting for this exit."
     elif t.exit_reason == "time":
         title = "EXIT RUNNER (end of day)"
         act = "Close the remaining contracts now."
@@ -121,7 +138,7 @@ def _runner_exit(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
         title = "RUNNER STOPPED at entry"
         act = "Your stop at entry should have closed the rest. Check Robinhood."
     body = (f"Runner {'+' if rest >= 0 else '-'}{abs(rest):.2f} pts (exit {_px(t.exit_price or 0)}); first part was {first:+.2f} pts.\n"
-            + f"Whole trade {sign}{abs(pts):.2f} pts per contract on average" + (f" ({money})" if money else "") + ", before costs.\n"
+            + f"Whole trade {sign}{abs(pts):.2f} pts per contract on average ({money}), before costs.\n"
             + act)
     return f"{'PAPER ' if w.paper else ''}{symbol} {w.name}: {title}", body
 

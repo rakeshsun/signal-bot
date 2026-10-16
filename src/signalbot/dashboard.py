@@ -17,7 +17,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .bars import CHICAGO
-from .messages import contract_names
+from .messages import contract_names, sizing
 from .strategies.base import Context
 
 E = html.escape
@@ -107,6 +107,15 @@ def _position(lv, last) -> str:
     up = (now_px - (t.entry_price or t.signal_close)) * t.direction
     side = "Long" if t.direction > 0 else "Short"
     money = "".join(f"<li><b>{E(n)}</b> {_usd(up * ppt)}</li>" for n, ppt in names.items())
+    unit, ppt0, size, keep = sizing(lv.watch, lv.symbol, t.runner)
+    if size > 1:
+        if t.part_price is not None:
+            first = (t.part_price - (t.entry_price or t.signal_close)) * t.direction
+            done = size - keep
+            money = (f'<li class="mine"><b>Your {size} {E(unit)}</b> {_usd(first * ppt0 * done + up * ppt0 * keep)} '
+                     f'<span>({done} closed {_usd(first * ppt0 * done)}, {keep} open {_usd(up * ppt0 * keep)})</span></li>')
+        else:
+            money = f'<li class="mine"><b>Your {size} {E(unit)}</b> {_usd(up * ppt0 * size)}</li>' + money
     return f"""<div class="pos {'long' if t.direction > 0 else 'short'}">
   <div class="pos-main">
     <p class="pos-state">{side} {E(lv.symbol)}</p>
@@ -117,6 +126,16 @@ def _position(lv, last) -> str:
   </div>
   {_ladder(t, now_px)}
 </div>"""
+
+
+def _runner_split(lv, t) -> str:
+    unit, _, size, keep = sizing(lv.watch, lv.symbol, t.runner)
+    return f" for {size - keep} of them; the other {keep} ride (stop for all {size})" if keep else ""
+
+
+def _size_names(lv, names: str) -> str:
+    unit, _, size, _ = sizing(lv.watch, lv.symbol)
+    return f"{size} {unit}" if size > 1 else names
 
 
 def _runner_note(t) -> str:
@@ -477,6 +496,7 @@ h3{font-size:12px;font-weight:600;color:var(--faint);margin:0 0 10px}
 .pnl{font:700 40px/1 "Archivo",sans-serif;font-stretch:120%;margin:12px 0 6px!important;letter-spacing:-.02em}
 .pnl span{display:block;font:500 12px/1.4 "Archivo",sans-serif;font-stretch:100%;letter-spacing:0;color:var(--soft);margin-top:4px}
 .money{list-style:none;padding:0;margin:0 0 8px;display:flex;flex-wrap:wrap;gap:4px 14px;font-size:14px}
+.money .mine{flex-basis:100%;font-size:16px}.money .mine span{color:var(--soft);font-size:12.5px}
 .ladder{position:relative;min-height:180px;border-left:2px solid var(--line);margin-left:6px}
 .zone{position:absolute;left:0;right:0}.zone.good{background:color-mix(in srgb,var(--up) 14%,transparent)}.zone.bad{background:color-mix(in srgb,var(--down) 14%,transparent)}
 .lv{position:absolute;left:-2px;right:0;transform:translateY(-50%);display:flex;justify-content:space-between;align-items:center;font-size:12px;padding-left:10px;border-top:1px dashed var(--faint)}
@@ -712,7 +732,7 @@ def _action(lv) -> str:
             return f"""<div class="act flash {'buy' if buy else 'sell'}" role="alert">
   <p class="act-word">{'BUY' if buy else 'SELL'}</p>
   <div class="act-body"><p class="act-head">{name}, signal {_clock(fired)} ({'just now' if mins < 2 else f'{mins} min ago'})</p>
-  <p>On Robinhood: {'buy' if buy else 'sell'} {E(names)}, then place a stop <b>{t.risk:.2f} pts {below}</b> and a limit <b>{t.reward:.2f} pts {above}</b> your fill.</p>
+  <p>On Robinhood: {'buy' if buy else 'sell'} {E(_size_names(lv, names))}, then place a stop <b>{t.risk:.2f} pts {below}</b> and a limit <b>{t.reward:.2f} pts {above}</b> your fill{_runner_split(lv, t)}.</p>
   <p class="act-sm">Signal close {_px(t.signal_close)}, stop {_px(t.stop)}, target {_px(t.target)}</p></div></div>"""
         return f"""<div class="act hold {'buy' if buy else 'sell'}">
   <p class="act-word">HOLD</p>
