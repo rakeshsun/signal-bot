@@ -79,6 +79,8 @@ class BosPullback(Strategy):
         rr: float = 2.0
         stop_pad: float = 0.5  # points beyond the pullback extreme
         stop_atr: float = 0.0  # extra stop room in ATR(14): survives the quick wick after a breakout
+        runner: float = 0.0  # fraction kept after the target (0.5 = half off at target, half rides)
+        runner_swing: int = 8  # swing size (bars each side) whose break is the runner's CHoCH exit
         session_start: int = 1800
         session_end: int = 200
         do_long: bool = True
@@ -195,9 +197,17 @@ class BosPullback(Strategy):
             risk = (close - stop) * d
             if risk <= 0:
                 continue
-            out[i] = Signal(d, stop=stop, target=close + d * p.rr * risk,
+            out[i] = Signal(d, stop=stop, target=close + d * p.rr * risk, runner=p.runner,
                             info={"setup": f"BOS {'up' if d > 0 else 'down'} after retest, pullback {pull:,.1f}"})
         return out
+
+    def structure(self, bars: list[Bar]):
+        """Swings for the runner's CHoCH exit (None when runners are off)."""
+        if not self.p.runner:
+            return None
+        k = self.p.runner_swing
+        ph, pl = _pivots([b.high for b in bars], [b.low for b in bars], k, k)
+        return ph, pl, k
 
     def levels(self, bars: list[Bar], ctx: Context):
         if len(bars) < 4 * self.p.swing + 5:

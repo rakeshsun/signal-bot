@@ -88,7 +88,8 @@ def entry_announced(sent: SentLog, watch_name: str, trade) -> bool:
 
 
 def evaluate(strategy: Strategy, bars, ctx: Context) -> Result:
-    return simulate(bars, strategy.signals(bars, ctx), flat_hhmm=getattr(strategy, "flat_hhmm", None))
+    structure = strategy.structure(bars) if hasattr(strategy, "structure") else None
+    return simulate(bars, strategy.signals(bars, ctx), flat_hhmm=getattr(strategy, "flat_hhmm", None), structure=structure)
 
 
 @dataclass
@@ -300,6 +301,12 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
                             continue
                         title, body = messages.entry(ev.trade, lv.watch, lv.symbol, lv.res, lv.book.bar_ms)
                         await alerts.send(key, title, body, urgent=True, kind="entry")
+                    elif ev.kind == "partial":
+                        if not entry_announced(sent, lv.watch.name, ev.trade):
+                            sent.add(key)
+                            continue
+                        title, body = messages.partial(ev.trade, lv.watch, lv.symbol)
+                        await alerts.send(key, title, body, urgent=True, kind="exit")
                     else:
                         # only exits of trades you were told about: a trade that began and ended
                         # inside a data gap (or before a partial start-up history) stays silent
@@ -310,7 +317,8 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
                         title, body = messages.exit_(ev.trade, lv.watch, lv.symbol)
                         if ev.bar_index < n - 2:
                             title += " (late)"
-                        await alerts.send(key, title, body, kind="exit")
+                        # a CHoCH exit has no order waiting at the broker: you must act, so it's urgent
+                        await alerts.send(key, title, body, urgent=ev.trade.exit_reason in ("choch", "time"), kind="exit")
 
             # weekday heartbeat, once, inside a 30-minute window after heartbeat_hhmm
             hb_end = s.heartbeat_hhmm + 30 if s.heartbeat_hhmm % 100 < 30 else s.heartbeat_hhmm + 70

@@ -54,7 +54,10 @@ def _usd(x: float) -> str:
 def _ladder(t, last_close: float) -> str:
     """Vertical price ladder: target, entry, now, stop placed by price."""
     entry = t.entry_price or t.signal_close
-    pts = {"Target": t.target, "Entry": entry, "Now": last_close, "Stop": t.stop}
+    stop = getattr(t, "active_stop", t.stop)  # runner: the stop sits at entry once the target took part off
+    pts = {"Target": t.target, "Entry": entry, "Now": last_close, "Stop": stop}
+    if stop == entry:
+        pts.pop("Stop")
     hi, lo = max(pts.values()), min(pts.values())
     span = (hi - lo) or 1.0
 
@@ -62,7 +65,7 @@ def _ladder(t, last_close: float) -> str:
         return 6 + (hi - v) / span * 88  # % from top
 
     zone_good = (min(entry, t.target), max(entry, t.target))
-    zone_bad = (min(entry, t.stop), max(entry, t.stop))
+    zone_bad = (min(entry, stop), max(entry, stop))
     # label positions, pushed apart (top to bottom) so close prices never print on top of each other
     pos, last = {}, None
     for k, v in sorted(pts.items(), key=lambda kv: y(kv[1])):
@@ -73,7 +76,7 @@ def _ladder(t, last_close: float) -> str:
         f'<div class="lv lv-{k.lower()}" style="top:{pos[k] - over:.1f}%"><span class="lv-k">{k}</span><span class="lv-v">{_px(v)}</span></div>'
         for k, v in pts.items()
     )
-    return f"""<div class="ladder" role="img" aria-label="Stop {_px(t.stop)}, entry {_px(entry)}, now {_px(last_close)}, target {_px(t.target)}">
+    return f"""<div class="ladder" role="img" aria-label="Stop {_px(stop)}, entry {_px(entry)}, now {_px(last_close)}, target {_px(t.target)}">
   <div class="zone good" style="top:{y(zone_good[1]):.1f}%;height:{y(zone_good[0]) - y(zone_good[1]):.1f}%"></div>
   <div class="zone bad" style="top:{y(zone_bad[1]):.1f}%;height:{y(zone_bad[0]) - y(zone_bad[1]):.1f}%"></div>
   {rows}
@@ -110,10 +113,22 @@ def _position(lv, last) -> str:
     <p class="pos-sub">Signal {_day(t.signal_time).lower() if _day(t.signal_time) == 'Today' else _day(t.signal_time)} at {_clock(t.signal_time + lv.book.bar_ms)}, entry {_px(t.entry_price or t.signal_close)}</p>
     <p class="pnl {'up' if up >= 0 else 'down'}">{up:+.2f}<span>points open, {'live' if live_px is not None else 'at last close'} {_px(now_px)}</span></p>
     <ul class="money">{money}</ul>
-    <p class="pos-sub">Stop {t.risk:.2f} pts away, target {t.reward:.2f} pts away</p>
+    {_runner_note(t) if t.runner else f'<p class="pos-sub">Stop {t.risk:.2f} pts away, target {t.reward:.2f} pts away</p>'}
   </div>
   {_ladder(t, now_px)}
 </div>"""
+
+
+def _runner_note(t) -> str:
+    entry_px = t.entry_price or t.signal_close
+    if t.part_price is None:
+        return (f'<p class="pos-sub">Runner trade: {1 - t.runner:.0%} closes at target {_px(t.target)}, '
+                f'{t.runner:.0%} rides. Stop {_px(t.stop)} for all until then.</p>')
+    first = (t.part_price - entry_px) * t.direction
+    sw = f", trend breaks below {_px(t.swing)}" if t.swing is not None and t.direction > 0 else (
+         f", trend breaks above {_px(t.swing)}" if t.swing is not None else "")
+    return (f'<p class="pos-sub"><b class="up">{1 - t.runner:.0%} closed +{first:.2f} pts</b> at {_px(t.part_price)}. '
+            f'Runner {t.runner:.0%}: stop at entry {_px(entry_px)}{sw}.</p>')
 
 
 def _window(lv) -> str:
@@ -313,13 +328,21 @@ def _recent(lv) -> str:
         f'<tr><td>{_day(t.signal_time)}<small>{_clock(t.signal_time + lv.book.bar_ms)}</small></td>'
         f'<td><span class="tag {"long" if t.direction > 0 else "short"}">{"Long" if t.direction > 0 else "Short"}</span></td>'
         f'<td class="num">{_px(t.entry_price or t.signal_close)}</td><td class="num">{_px(t.exit_price)}</td>'
-        f'<td>{E({"target": "Target", "stop": "Stop", "time": "Time exit"}.get(t.exit_reason or "", "Open"))}</td>'
+        f'<td>{E(_result(t))}</td>'
         f'<td class="num {"up" if (t.points or 0) > 0 else "down" if t.points is not None else ""}">{"" if t.points is None else f"{t.points:+.2f}"}</td>'
         f'<td>{_jr(lv, t)}</td></tr>'
         for t in trades)
     return (f'<details class="more trades" data-key="t:{E(lv.watch.name)}"><summary>Recent trades ({len(trades)})</summary>'
             '<table class="tt"><thead><tr><th>Signal</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Pts</th><th>You</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></details>')
+
+
+def _result(t) -> str:
+    if t.exit_reason is None:
+        return "Half off, riding" if t.part_price is not None else "Open"
+    if t.part_price is not None:
+        return {"choch": "Target + trend exit", "stop": "Target + stop at entry", "time": "Target + time exit"}.get(t.exit_reason, "Closed")
+    return {"target": "Target", "stop": "Stop", "time": "Time exit"}.get(t.exit_reason, "Closed")
 
 
 def _jr(lv, t) -> str:
@@ -586,6 +609,17 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 FRESH_MIN = 30  # a new entry signal flashes at the top of the page for this many minutes
 
 
+def _hold_text(t) -> str:
+    if t.runner and t.part_price is not None:
+        return (f"Target hit: {1 - t.runner:.0%} is closed. If you took this trade, keep the stop on the rest at your entry "
+                f"({_px(t.entry_price or t.signal_close)}). Wait for the EXIT RUNNER alert. No new signals until it closes.")
+    if t.runner:
+        return (f"If you took this trade: stop {_px(t.stop)} for all contracts, limit {_px(t.target)} for {1 - t.runner:.0%} of them. "
+                "If you didn't, do nothing: don't enter late.")
+    return (f"If you took this trade: keep your stop at {_px(t.stop)} and limit at {_px(t.target)} (or the same distances from your fill). "
+            "If you didn't, do nothing: don't enter late. No new signals until it closes.")
+
+
 def _signal_button(lv) -> str:
     """Blinking BUY / SELL button in the watch panel while a new signal is fresh; HOLD while in a trade."""
     t = lv.res.open_trade if lv.res else None
@@ -596,7 +630,11 @@ def _signal_button(lv) -> str:
     side = ("PAPER " if lv.watch.paper else "") + ("BUY" if buy else "SELL")
     mins = max(0, int((time.time() * 1000 - fired) // 60_000))
     levels = f"Entry {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}"
-    if mins <= FRESH_MIN:
+    if t.runner:
+        levels += f" ({1 - t.runner:.0%} off, rest rides)"
+    if t.part_price is not None:
+        levels = f"{1 - t.runner:.0%} closed at {_px(t.part_price)} · runner stop at entry {_px(t.entry_price or t.signal_close)}"
+    if mins <= FRESH_MIN and t.part_price is None:
         ago = "just now" if mins < 2 else f"{mins} min ago"
         return (f'<div class="sigbtn flash {"buy" if buy else "sell"}" role="alert" data-sig="{E(lv.watch.name)}|{t.signal_time}"><span class="sb-word">{side} NOW</span>'
                 f'<span class="sb-lv">{levels}</span><span class="sb-sm">signal {_clock(fired)} ({ago}) · don\'t enter if price ran far past entry</span>{_jr(lv, t)}</div>')
@@ -639,7 +677,7 @@ def _action(lv) -> str:
         return f"""<div class="act hold {'buy' if buy else 'sell'}">
   <p class="act-word">HOLD</p>
   <div class="act-body"><p class="act-head">{name}: {'long' if buy else 'short'} since {_clock(fired)}{'' if _day(fired) == 'Today' else ' ' + _day(fired)}</p>
-  <p>If you took this trade: keep your stop at {_px(t.stop)} and limit at {_px(t.target)} (or the same distances from your fill). If you didn't, do nothing: don't enter late. No new signals until it closes.</p></div></div>"""
+  <p>{_hold_text(t)}</p></div></div>"""
     last = res.trades[-1] if res and res.trades else None
     if last and last.exit_time and now_ms - (last.exit_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
         won = (last.points or 0) > 0

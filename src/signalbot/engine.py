@@ -12,6 +12,10 @@ applies the same execution rules as a TradingView ``strategy()`` script:
 * one trade at a time: signals are ignored while a trade is open, and (like a
   Pine script that tracks an ``active`` flag) also on the bar where a trade
   that filled on the previous bar closes;
+* optional runner (``Signal.runner`` = fraction kept, e.g. 0.5): when the target is hit only
+  the rest of the position closes there; the runner's stop moves to the entry price and it
+  exits on a change of character (CHoCH): a close beyond the latest swing low (long) / swing
+  high (short) that formed after the entry. Swings come from ``structure`` (see simulate).
 * optional ``flat_hhmm``: an open trade is closed at the close of the first bar
   starting at or after that clock time (Pine's ``strategy.close_all`` fills at the
   next open, a tick later; closing on the bar close lets the alert go out on time).
@@ -31,6 +35,7 @@ class Signal:
     stop: float
     target: float
     info: dict[str, Any] = field(default_factory=dict)  # extra text for alerts
+    runner: float = 0.0  # fraction of the position kept after the target (0 = all exits at target)
 
 
 @dataclass
@@ -47,7 +52,17 @@ class Trade:
     exit_index: int | None = None
     exit_time: int | None = None
     exit_price: float | None = None
-    exit_reason: str | None = None  # "target" | "stop" | "time"
+    exit_reason: str | None = None  # "target" | "stop" | "time" | "choch"
+    runner: float = 0.0
+    part_index: int | None = None  # bar where the target took the first part off
+    part_time: int | None = None
+    part_price: float | None = None
+    swing: float | None = None  # runner: latest swing after entry (a close beyond it = CHoCH exit)
+
+    @property
+    def active_stop(self) -> float:
+        """Where the stop is now: the entry price once the first part is off, else the initial stop."""
+        return self.entry_price if self.part_price is not None and self.entry_price is not None else self.stop
 
     @property
     def risk(self) -> float:
@@ -63,9 +78,14 @@ class Trade:
 
     @property
     def points(self) -> float | None:
+        """Points per contract, averaged over the whole position (first part + runner)."""
         if self.exit_price is None or self.entry_price is None:
             return None
-        return (self.exit_price - self.entry_price) * self.direction
+        rest = (self.exit_price - self.entry_price) * self.direction
+        if self.part_price is None:
+            return rest
+        first = (self.part_price - self.entry_price) * self.direction
+        return (1 - self.runner) * first + self.runner * rest
 
     @property
     def won(self) -> bool | None:
@@ -75,7 +95,7 @@ class Trade:
 
 @dataclass
 class Event:
-    kind: str  # "entry" | "exit"
+    kind: str  # "entry" | "partial" | "exit"
     bar_index: int
     bar_time: int
     trade: Trade
@@ -120,8 +140,11 @@ def first_touch(bar: Bar, stop: float, target: float, direction: int) -> tuple[s
     return ("stop", stop) if high_first else ("target", target)
 
 
-def simulate(bars: list[Bar], signals: list[Signal | None], flat_hhmm: int | None = None) -> Result:
-    """Turn per-bar signals into trades. ``signals[i]`` is evaluated on bar i's close."""
+def simulate(bars: list[Bar], signals: list[Signal | None], flat_hhmm: int | None = None, structure=None) -> Result:
+    """Turn per-bar signals into trades. ``signals[i]`` is evaluated on bar i's close.
+    ``structure`` = (swing_highs, swing_lows, right_bars): the swing value confirmed at bar i (or
+    None), printed ``right_bars`` bars earlier. Needed only for runners (CHoCH exits)."""
+    far = float("inf")
     if len(signals) != len(bars):
         raise ValueError("signals must have one entry per bar")
     res = Result(bars=bars)
@@ -133,9 +156,23 @@ def simulate(bars: list[Bar], signals: list[Signal | None], flat_hhmm: int | Non
             if trade.entry_index is None and i == trade.signal_index + 1:
                 trade.entry_index, trade.entry_price = i, bar.open
             if trade.entry_index is not None:
-                hit = first_touch(bar, trade.stop, trade.target, trade.direction)
+                d = trade.direction
+                running = trade.part_price is not None
+                hit = first_touch(bar, trade.active_stop, (d * far) if running else trade.target, d)
+                if hit is not None and hit[0] == "target" and trade.runner > 0 and not running:
+                    # first part off at the target; the runner carries on with its stop at entry
+                    trade.part_index, trade.part_time, trade.part_price = i, bar.time, hit[1]
+                    res.events.append(Event("partial", i, bar.time, trade))
+                    hit = None
                 if hit is None and flat_hhmm is not None and hhmm(bar.time) >= flat_hhmm:
                     hit = ("time", bar.close)
+                if hit is None and trade.runner > 0 and structure is not None:
+                    highs, lows, right = structure
+                    p = lows[i] if d > 0 else highs[i]
+                    if p is not None and i - right >= trade.entry_index:
+                        trade.swing = p  # a swing that formed after the entry
+                    if trade.part_price is not None and trade.swing is not None and (bar.close - trade.swing) * d < 0:
+                        hit = ("choch", bar.close)
                 if hit is not None:
                     trade.exit_reason, trade.exit_price = hit
                     trade.exit_index, trade.exit_time = i, bar.time
@@ -149,6 +186,7 @@ def simulate(bars: list[Bar], signals: list[Signal | None], flat_hhmm: int | Non
         if trade is not None or sig is None:
             continue
         trade = Trade(
+            runner=sig.runner,
             direction=sig.direction,
             signal_index=i,
             signal_time=bar.time,

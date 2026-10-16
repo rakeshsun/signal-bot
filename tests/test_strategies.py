@@ -156,3 +156,35 @@ def test_bos_pullback_stop_atr_widens_the_stop():
     wide = [s for s in B(B.make_params({**allday, "stop_atr": 1.5})).signals(bars, Ctx("X")) if s]
     assert tight and len(tight) == len(wide)
     assert all(abs(w.stop - w_t.stop) > 0 and (w.stop - w_t.stop) * w.direction < 0 for w, w_t in zip(wide, tight))
+
+
+def test_runner_takes_part_at_target_then_exits_on_choch():
+    from signalbot.bars import Bar
+    from signalbot.engine import Signal, simulate
+
+    # long at 100: target 102 takes half off, price climbs, makes a swing low at 103, then closes below it
+    path = [(100, 100), (100, 101), (101, 102.5), (102.5, 104), (104, 103), (103, 105), (105, 106), (106, 107), (107, 102)]
+    bars = [Bar(time=i * 60_000, open=o, high=max(o, c) + 0.2, low=min(o, c) - 0.2, close=c, volume=1) for i, (o, c) in enumerate(path)]
+    sigs = [None] * len(bars)
+    sigs[0] = Signal(1, stop=98, target=102, runner=0.5)
+    lows = [None] * len(bars)
+    lows[6] = 102.8  # swing low printed at bar 4, confirmed 2 bars later
+    res = simulate(bars, sigs, structure=([None] * len(bars), lows, 2))
+    t = res.trades[0]
+    assert t.part_price == 102 and t.part_index == 2
+    assert t.exit_reason == "choch" and t.exit_index == 8 and t.exit_price == 102
+    assert t.points == 0.5 * (102 - 100) + 0.5 * (102 - 100)
+    assert [e.kind for e in res.events] == ["entry", "partial", "exit"]
+
+
+def test_runner_stop_moves_to_entry_after_target():
+    from signalbot.bars import Bar
+    from signalbot.engine import Signal, simulate
+
+    path = [(100, 100), (100, 101), (101, 102.5), (102.5, 101), (101, 99)]
+    bars = [Bar(time=i * 60_000, open=o, high=max(o, c) + 0.2, low=min(o, c) - 0.2, close=c, volume=1) for i, (o, c) in enumerate(path)]
+    sigs = [None] * len(bars)
+    sigs[0] = Signal(1, stop=98, target=102, runner=0.5)
+    t = simulate(bars, sigs, structure=([None] * 5, [None] * 5, 2)).trades[0]
+    assert t.exit_reason == "stop" and t.exit_price == 100  # stopped at entry, not at 98
+    assert t.points == 1.0  # half +2, half 0

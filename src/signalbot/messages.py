@@ -59,14 +59,36 @@ def entry(t: Trade, w: Watch, symbol: str, res: Result, bar_ms: int) -> tuple[st
     if n >= 5:
         lines.append(f"{'Longs' if t.direction > 0 else 'Shorts'} in the bot's history window: {wins}/{n} won")
     names = " or ".join(contract_names(w, symbol)) or symbol
-    lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, then right away place a stop "
-                 f"{t.risk:.2f} pts {below} and a limit {t.reward:.2f} pts {above} your fill price. Signal only, not advice.")
+    if t.runner:
+        keep = f"{t.runner:.0%}"
+        lines.append(f"RUNNER TRADE: take {1 - t.runner:.0%} off at TP, let {keep} ride. E.g. 4 contracts: limit for 2 at TP, "
+                     f"stop for all 4. When TP fills, move the stop on the rest to your entry; the bot alerts EXIT RUNNER "
+                     f"when the trend breaks (change of character).")
+        lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, stop {t.risk:.2f} pts {below} your fill for the whole "
+                     f"position, limit {t.reward:.2f} pts {above} for the first part only. Signal only, not advice.")
+    else:
+        lines.append(f"On Robinhood: {'buy' if t.direction > 0 else 'sell'} {names}, then right away place a stop "
+                     f"{t.risk:.2f} pts {below} and a limit {t.reward:.2f} pts {above} your fill price. Signal only, not advice.")
     tag = "PAPER " if w.paper else ""
     # the title shows in bold on the phone / Mac banner: lead with the numbers you need to place the order
     return f"{tag}{levels} | {symbol} {w.name}", "\n".join(lines)
 
 
+def partial(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
+    """Runner trades: the target took the first part off; the rest keeps going."""
+    entry_px = t.entry_price or t.signal_close
+    first = ((t.part_price or 0) - entry_px) * t.direction
+    money = " · ".join(f"{name} +{_usd(first * ppt)}" for name, ppt in contract_names(w, symbol).items())
+    body = (f"Target {_px(t.part_price or 0)} hit: the first {1 - t.runner:.0%} closed +{first:.2f} pts"
+            + (f" ({money} per contract)" if money else "") + ".\n"
+            + f"NOW: move the stop on the remaining {t.runner:.0%} to your entry ({_px(entry_px)}).\n"
+            + "Let it ride. The bot sends EXIT RUNNER when the trend breaks (change of character).")
+    return f"{'PAPER ' if w.paper else ''}{symbol} {w.name}: TARGET HIT, move stop to entry {_px(entry_px)}", body
+
+
 def exit_(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
+    if t.part_price is not None:  # runner trade: the first part is already closed
+        return _runner_exit(t, w, symbol)
     side = "LONG" if t.direction > 0 else "SHORT"
     pts = t.points or 0.0
     sign = "+" if pts >= 0 else "-"
@@ -80,6 +102,28 @@ def exit_(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
            else "If your stop / limit orders were in place, the position should be closed. Check Robinhood and cancel the other order.")
     )
     return f"{'PAPER ' if w.paper else ''}{symbol} {w.name}: {reason}", body
+
+
+def _runner_exit(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
+    entry_px = t.entry_price or t.signal_close
+    rest = ((t.exit_price or 0) - entry_px) * t.direction
+    first = ((t.part_price or 0) - entry_px) * t.direction
+    pts = t.points or 0.0
+    sign = "+" if pts >= 0 else "-"
+    money = " · ".join(f"{name} {sign}{_usd(abs(pts) * ppt)}" for name, ppt in contract_names(w, symbol).items())
+    if t.exit_reason == "choch":
+        title = f"EXIT RUNNER NOW ~{_px(t.exit_price or 0)}"
+        act = "Close the remaining contracts at market now: the trend broke (change of character). No order is waiting for this exit."
+    elif t.exit_reason == "time":
+        title = "EXIT RUNNER (end of day)"
+        act = "Close the remaining contracts now."
+    else:
+        title = "RUNNER STOPPED at entry"
+        act = "Your stop at entry should have closed the rest. Check Robinhood."
+    body = (f"Runner {'+' if rest >= 0 else '-'}{abs(rest):.2f} pts (exit {_px(t.exit_price or 0)}); first part was {first:+.2f} pts.\n"
+            + f"Whole trade {sign}{abs(pts):.2f} pts per contract on average" + (f" ({money})" if money else "") + ", before costs.\n"
+            + act)
+    return f"{'PAPER ' if w.paper else ''}{symbol} {w.name}: {title}", body
 
 
 def news(name: str) -> tuple[str, str]:
