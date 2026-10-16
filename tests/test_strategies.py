@@ -143,3 +143,16 @@ def test_bos_pullback_no_lookahead_and_sane_levels():
         if s:
             assert (b.close - s.stop) * s.direction > 0 and (s.target - b.close) * s.direction > 0
     assert cls(p).checklist(bars, Context())
+
+
+def test_bos_pullback_stop_atr_widens_the_stop():
+    from signalbot.strategies.base import Context as Ctx
+
+    c, v = random_walk()
+    bars = make_bars(c, vol=v)
+    B = strategies.get("bos_pullback")
+    allday = {"session_start": 0, "session_end": 2400}
+    tight = [s for s in B(B.make_params(allday)).signals(bars, Ctx("X")) if s]
+    wide = [s for s in B(B.make_params({**allday, "stop_atr": 1.5})).signals(bars, Ctx("X")) if s]
+    assert tight and len(tight) == len(wide)
+    assert all(abs(w.stop - w_t.stop) > 0 and (w.stop - w_t.stop) * w.direction < 0 for w, w_t in zip(wide, tight))

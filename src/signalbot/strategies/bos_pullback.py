@@ -13,16 +13,20 @@ Bullish (bearish is the mirror image):
   5. BOS: a later bar closes above the new high -> BUY signal on that close.
   Invalid: a close more than ``invalid_ticks`` back through the old level, or older than ``max_wait``.
   A fresh break the other way cancels the pending setups of the old direction.
-Trade: stop just beyond the pullback extreme (lowest low since the retest), target = rr x risk.
+Trade: stop beyond the pullback extreme (lowest low since the retest) by ``stop_pad`` points plus
+``stop_atr`` x ATR(14), target = rr x risk.
 
-1-year GC test (3-minute bars, Asia 18:00-02:00 CT, costs included): 151 trades, 48% wins,
-profit factor 1.88 (first half 1.96, second half 1.74).
+1-year GC tests (costs included):
+  3m, Asia 18:00-02:00, stop_atr 0,   rr 2.0:   154 trades, 48% wins, PF 1.87 (halves 1.96 / 1.70)
+  3m, Asia 18:00-02:00, stop_atr 1.5, rr 1.25:  154 trades, 61% wins, PF 1.96 (halves 2.20 / 1.61)
+  15m, all hours, swing 3, stop_atr 1.5, rr 0.75: 42 trades, 71% wins, PF 2.51 (halves 2.57 / 2.36)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .. import indicators as ta
 from ..bars import Bar, hhmm
 from ..engine import Signal
 from . import register
@@ -74,6 +78,7 @@ class BosPullback(Strategy):
         tick: float = 0.1  # GC / MGC tick size
         rr: float = 2.0
         stop_pad: float = 0.5  # points beyond the pullback extreme
+        stop_atr: float = 0.0  # extra stop room in ATR(14): survives the quick wick after a breakout
         session_start: int = 1800
         session_end: int = 200
         do_long: bool = True
@@ -175,6 +180,7 @@ class BosPullback(Strategy):
             return out
         events, _ = self._run(bars)
         skip = {int(x) for x in str(p.skip_bars).replace(" ", "").split(",") if x}
+        atr = ta.atr([b.high for b in bars], [b.low for b in bars], [b.close for b in bars], 14) if p.stop_atr else None
         for i, ev in enumerate(events):
             if ev is None:
                 continue
@@ -183,7 +189,7 @@ class BosPullback(Strategy):
             if not self._in_session(t) or t in skip or (d == 1 and not p.do_long) or (d == -1 and not p.do_short):
                 continue
             close = bars[i].close
-            stop = pull - d * p.stop_pad
+            stop = pull - d * (p.stop_pad + (p.stop_atr * (atr[i] or 0) if atr else 0))
             risk = (close - stop) * d
             if risk <= 0:
                 continue

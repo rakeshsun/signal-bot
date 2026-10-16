@@ -134,7 +134,9 @@ def _timeline(lv, news_today: str | None) -> str:
     if a is None or b is None:
         return ""
     night = a > b  # overnight window (e.g. Asia): show 4 PM - 4 AM instead of the morning
-    start, end = (16 * 60, 28 * 60) if night else (6 * 60, 12 * 60)
+    span = ((b // 100 * 60 + b % 100) - (a // 100 * 60 + a % 100)) % 1440
+    allday = night and span > 12 * 60  # e.g. 5 PM - 4 PM: show the whole CME day
+    start, end = ((17 * 60, 41 * 60) if allday else (16 * 60, 28 * 60)) if night else (6 * 60, 12 * 60)
 
     def mins(hhmm: int) -> int:
         m = hhmm // 100 * 60 + hhmm % 100
@@ -149,9 +151,9 @@ def _timeline(lv, news_today: str | None) -> str:
     marker = f'<div class="tl-now" style="left:{x(now_m):.1f}%"><span>now</span></div>' if showing_now else ""
     news = (f'<div class="tl-news" style="left:{x(700):.1f}%;width:{x(800) - x(700):.1f}%" title="{E(news_today)} at 7:30, no entries"></div>'
             if news_today and lv.watch.news_alert else "")
-    hours = range(16, 29, 2) if night else range(6, 13)
-    ticks = "".join(f'<span style="left:{x((h % 24) * 100):.1f}%">{(h % 12) or 12}{"am" if h % 24 < 12 else "pm"}</span>' for h in hours)
-    recent = now.timestamp() * 1000 - 14 * 3600_000
+    hours = (range(17, 42, 4) if allday else range(16, 29, 2)) if night else range(6, 13)
+    ticks = "".join(f'<span style="left:{(h * 60 - start) / (end - start) * 100:.1f}%">{(h % 12) or 12}{"am" if h % 24 < 12 else "pm"}</span>' for h in hours)
+    recent = now.timestamp() * 1000 - (24 if allday else 14) * 3600_000
     trades = "".join(
         f'<div class="tl-trade {"long" if t.direction > 0 else "short"}" style="left:{x(_dt(t.signal_time).hour * 100 + _dt(t.signal_time).minute):.1f}%" title="{"Long" if t.direction > 0 else "Short"} signal {_clock(t.signal_time + lv.book.bar_ms)}"></div>'
         for t in lv.res.trades if (t.signal_time >= recent if night else _dt(t.signal_time).date() == now.date())
@@ -161,7 +163,7 @@ def _timeline(lv, news_today: str | None) -> str:
     return f"""<div class="tl">
   <div class="tl-track"><div class="tl-win" style="left:{x(a):.1f}%;width:{x(b) - x(a):.1f}%"></div>{news}{trades}{marker}</div>
   <div class="tl-ticks">{ticks}</div>
-  <p class="tl-cap">Entry window {_window(lv)}{' (overnight)' if night else ''}{f'. {E(news_today)} at 7:30: no entries 7–8' if news_today and lv.watch.news_alert else ''}</p>
+  <p class="tl-cap">Entry window {_window(lv)}{' (all day, Sun–Fri)' if allday else ' (overnight)' if night else ''}{f'. {E(news_today)} at 7:30: no entries 7–8' if news_today and lv.watch.news_alert else ''}</p>
 </div>"""
 
 
