@@ -235,18 +235,21 @@ class BosPullback(Strategy):
         mins = int((bars[-1].time - bars[-2].time) / 60000) if len(bars) > 1 else 3
         rows: list[tuple[str, str, bool]] = []
         if not active:
-            return [("What to do", "Nothing. No setup right now.", False)]
+            return [("What to do", "Nothing. No setup right now: waiting for gold to break a recent high or low.", False)]
         s = active[-1]  # the newest setup is the one that matters
         buy = s.d == 1
         side = "BUY" if buy else "SELL"
         cancel = s.ref - p.invalid_ticks * p.tick if buy else s.ref + p.invalid_ticks * p.tick
         if s.stage == 1:
-            rows.append(("What to do", "Nothing yet. Just wait.", False))
+            back = "down" if buy else "up"
+            wait = max(0, p.min_clean - s.clean)
+            first = f" It first needs {wait} more bar{'s' if wait != 1 else ''} that stay away from it." if wait else ""
+            rows.append(("What to do", f"Nothing yet. Step 1 of 2: waiting for gold to come back {back} to {s.ref:,.1f} (the retest).{first}", False))
             rows.append((f"{side} alert comes if",
-                         f"gold {'drops' if buy else 'rises'} back to {s.ref:,.1f}, then {'climbs above' if buy else 'falls below'} "
-                         f"{s.ext:,.1f} (gold is {now:,.1f} now)", False))
+                         f"after that retest, a {mins}-min bar closes {'above' if buy else 'below'} {s.ext:,.1f} "
+                         f"(gold is {now:,.1f} now)", False))
         else:
-            rows.append(("What to do", f"Get ready. A {side} alert may come soon.", True))
+            rows.append(("What to do", f"Get ready. Step 2 of 2: retest done, a {side} alert may come soon.", True))
             rows.append((f"{side} alert comes if", f"a {mins}-min bar closes {'above' if buy else 'below'} {s.ext:,.1f} (gold is {now:,.1f} now)", True))
         rows.append(("Setup is off if", f"gold closes {'below' if buy else 'above'} {cancel:,.1f}", False))
         return rows
