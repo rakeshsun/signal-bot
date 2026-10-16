@@ -78,7 +78,11 @@ class Journal:
             return data
 
 
-def make_handler(html_path: Path, journal: Journal, token: str):
+def make_handler(html_path: Path, journal: Journal, token: str, hosts: set[str] | None = None):
+    """``hosts``: names this server may be reached by. Anything else (a web page that points its
+    own domain at 127.0.0.1, "DNS rebinding") is refused, so other sites can't read or change it."""
+    allowed = {"localhost", "127.0.0.1", "[::1]"} | (hosts or set())
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "SignalDesk"
 
@@ -88,11 +92,22 @@ def make_handler(html_path: Path, journal: Journal, token: str):
         def _local(self) -> bool:
             return self.client_address[0] in ("127.0.0.1", "::1")
 
+        def _host_ok(self) -> bool:
+            host = (self.headers.get("Host") or "").strip().lower()
+            name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+            if name not in allowed:
+                return False
+            origin = self.headers.get("Origin")  # browsers send it on cross-site POSTs
+            return origin is None or urlparse(origin).hostname in {h.strip("[]") for h in allowed}
+
         def _authorized(self) -> bool:
+            if not self._host_ok():
+                return False
             if self._local():
                 return True
             q = parse_qs(urlparse(self.path).query)
-            return bool(token) and secrets.compare_digest(q.get("k", [""])[0], token)
+            given = q.get("k", [""])[0].encode()
+            return bool(token) and secrets.compare_digest(given, token.encode())
 
         def _send(self, code: int, body: bytes, ctype: str) -> None:
             self.send_response(code)
@@ -121,7 +136,7 @@ def make_handler(html_path: Path, journal: Journal, token: str):
             if urlparse(self.path).path != "/api/journal":
                 return self._send(404, b"Not found", "text/plain")
             try:
-                n = min(int(self.headers.get("Content-Length", "0")), 4096)
+                n = max(0, min(int(self.headers.get("Content-Length", "0")), 4096))
                 req = json.loads(self.rfile.read(n) or b"{}")
                 key, choice = str(req.get("key", ""))[:120], str(req.get("choice", ""))
                 if not key or choice not in CHOICES:
@@ -136,7 +151,8 @@ def make_handler(html_path: Path, journal: Journal, token: str):
 def start(html_path: Path, state_dir: Path, port: int, lan: bool, token: str) -> list[str]:
     """Start the server in a background thread. Returns the URLs it answers on ([] on failure)."""
     journal = Journal(state_dir / "journal.json")
-    handler = make_handler(html_path, journal, token if lan else "")
+    ip = lan_ip() if lan else ""
+    handler = make_handler(html_path, journal, token if lan else "", {ip} if ip else set())
     try:
         httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port), handler)
     except OSError as exc:
@@ -145,5 +161,5 @@ def start(html_path: Path, state_dir: Path, port: int, lan: bool, token: str) ->
     threading.Thread(target=httpd.serve_forever, name="dashboard-http", daemon=True).start()
     urls = [f"http://localhost:{port}/"]
     if lan:
-        urls.append(f"http://{lan_ip()}:{port}/?k={token}")
+        urls.append(f"http://{ip}:{port}/?k={token}")
     return urls

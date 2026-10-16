@@ -81,6 +81,12 @@ def _dump_bars(path: Path, bars) -> None:
         log.debug("bar dump failed: %s", exc)
 
 
+def entry_announced(sent: SentLog, watch_name: str, trade) -> bool:
+    """Was this trade's entry alerted (or part of the start-up baseline)? Exits of trades that were
+    never announced, e.g. ones that began and ended inside a data gap, are not sent."""
+    return f"{watch_name}|entry|{trade.signal_time}" in sent
+
+
 def evaluate(strategy: Strategy, bars, ctx: Context) -> Result:
     return simulate(bars, strategy.signals(bars, ctx), flat_hhmm=getattr(strategy, "flat_hhmm", None))
 
@@ -294,7 +300,13 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
                             continue
                         title, body = messages.entry(ev.trade, lv.watch, lv.symbol, lv.res, lv.book.bar_ms)
                         await alerts.send(key, title, body, urgent=True, kind="entry")
-                    else:  # always report exits, even late ones after a data gap
+                    else:
+                        # only exits of trades you were told about: a trade that began and ended
+                        # inside a data gap (or before a partial start-up history) stays silent
+                        if not entry_announced(sent, lv.watch.name, ev.trade):
+                            sent.add(key)
+                            log.info("%s: skipped exit alert for a trade that was never announced (%s)", lv.watch.name, key)
+                            continue
                         title, body = messages.exit_(ev.trade, lv.watch, lv.symbol)
                         if ev.bar_index < n - 2:
                             title += " (late)"
@@ -303,7 +315,9 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
             # weekday heartbeat, once, inside a 30-minute window after heartbeat_hhmm
             hb_end = s.heartbeat_hhmm + 30 if s.heartbeat_hhmm % 100 < 30 else s.heartbeat_hhmm + 70
             if s.heartbeat_hhmm >= 0 and s.heartbeat_hhmm <= now_hm < hb_end and today.weekday() < 5:
-                head = f"News today: {nd[today]} at 7:30 CT" if today in nd else "News today: none"
+                head = f"News today: {nd[today]} at 7:30 CT (no gold entries 7:00-8:00)" if today in nd else "News today: no CPI / jobs report"
+                if info.get(today):
+                    head += "\nOther big US news (not blocked): " + "; ".join(f"{t} {n}" for t, n in info[today])
                 parts = [head] + [
                     messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd)))
                     for lv in lives if lv.res

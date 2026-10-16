@@ -661,7 +661,7 @@ def _chart(lv, bars, live_bar) -> str:
     if len(view) < 5:
         return ""
     try:
-        lv_lines = lv.strategy.levels(allb, Context(lv.symbol, {}))
+        lv_lines = lv.strategy.levels(bars, Context(lv.symbol, {}))  # closed bars, same as "Next step"
     except Exception:
         lv_lines = []
     t = lv.res.open_trade if lv.res else None
@@ -669,7 +669,8 @@ def _chart(lv, bars, live_bar) -> str:
     series = []  # (label, values aligned to view, kind)
     for label, val, kind in lv_lines:
         if isinstance(val, list):
-            series.append((label, val[-len(view):], kind))
+            vals = val + [None] * (len(allb) - len(val))  # no value yet for the forming bar
+            series.append((label, vals[-len(view):], kind))
         elif val is not None:
             lines.append((label, float(val), kind))
     if t:

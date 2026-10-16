@@ -20,8 +20,8 @@ write_plist() {
   <key>Label</key><string>$LABEL</string>
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>ProgramArguments</key><array>
-    <!-- caffeinate -i keeps the Mac from idle-sleeping while the bot runs -->
-    <string>/usr/bin/caffeinate</string><string>-i</string>
+    <!-- caffeinate: -i no idle sleep, -s no system sleep while on power (closing the lid still sleeps) -->
+    <string>/usr/bin/caffeinate</string><string>-i</string><string>-s</string>
     <string>$REPO/.venv/bin/signalbot</string>
     <string>--log-file</string><string>$LOG</string><string>--keep-days</string><string>7</string>
     <string>run</string>

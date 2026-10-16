@@ -147,18 +147,44 @@ def test_dashboard_server_serves_page_and_journal(tmp_path):
         assert e.code == 400
 
 
-def test_dashboard_server_lan_needs_token(tmp_path):
+def test_dashboard_server_lan_needs_token_and_known_host(tmp_path):
     from signalbot import server
 
     tok = server.load_token(tmp_path)
     assert tok and server.load_token(tmp_path) == tok  # saved once, reused
-    h = server.make_handler(tmp_path / "d.html", server.Journal(tmp_path / "j.json"), tok)
-    fake = h.__new__(h)
-    fake.client_address = ("192.168.1.20", 5000)
-    fake.path = "/"
-    assert not fake._authorized()
-    fake.path = f"/?k={tok}"
-    assert fake._authorized()
-    fake.client_address = ("127.0.0.1", 5000)
-    fake.path = "/"
-    assert fake._authorized()
+    h = server.make_handler(tmp_path / "d.html", server.Journal(tmp_path / "j.json"), tok, {"192.168.1.5"})
+
+    def req(client, path, host, origin=None):
+        fake = h.__new__(h)
+        fake.client_address, fake.path = (client, 5000), path
+        fake.headers = {"Host": host, **({"Origin": origin} if origin else {})}
+        return fake._authorized()
+
+    assert not req("192.168.1.20", "/", "192.168.1.5:8765")
+    assert req("192.168.1.20", f"/?k={tok}", "192.168.1.5:8765")
+    assert not req("192.168.1.20", "/?k=caf\u00e9", "192.168.1.5:8765")  # non-ASCII key: refused, no crash
+    assert req("127.0.0.1", "/", "localhost:8765")
+    assert not req("127.0.0.1", "/", "evil.example:8765")  # DNS rebinding
+    assert not req("127.0.0.1", "/api/journal", "localhost:8765", origin="https://evil.example")  # cross-site POST
+    assert req("127.0.0.1", "/api/journal", "localhost:8765", origin="http://localhost:8765")
+
+
+def test_bos_run_cache_keeps_closed_and_live_answers():
+    c, v = random_walk()
+    bars = make_bars(c, vol=v)
+    s = strategies.get("bos_pullback")()
+    a = s._run(bars[:-1])
+    b = s._run(bars)
+    assert s._run(bars[:-1]) is a and s._run(bars) is b and len(s._run_cache) == 2
+
+
+def test_exit_alert_only_for_announced_trades(tmp_path):
+    from types import SimpleNamespace
+
+    from signalbot.runner import entry_announced
+
+    sent = SentLog(tmp_path / "s.json")
+    t = SimpleNamespace(signal_time=123)
+    assert not entry_announced(sent, "gold", t)  # began and ended inside a data gap: stay quiet
+    sent.add("gold|entry|123")
+    assert entry_announced(sent, "gold", t) and not entry_announced(sent, "gold-bos", t)

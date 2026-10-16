@@ -94,11 +94,13 @@ class BosPullback(Strategy):
         Cached on the bar list's identity (length + first/last bar), because the dashboard asks for
         the same answer several times per refresh."""
         key = (len(bars), bars[0].time, bars[-1].time, bars[-1].close) if bars else None
-        cache = getattr(self, "_run_cache", None)
-        if cache is not None and cache[0] == key:
-            return cache[1]
+        cache = self.__dict__.setdefault("_run_cache", {})
+        if key in cache:
+            return cache[key]
         result = self._run_uncached(bars)
-        self._run_cache = (key, result)
+        if len(cache) >= 2:  # closed bars and closed + forming bar: the two lists the page asks about
+            cache.pop(next(iter(cache)))
+        cache[key] = result
         return result
 
     def _run_uncached(self, bars: list[Bar]):
