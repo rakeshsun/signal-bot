@@ -207,8 +207,13 @@ def _checks(lv, nd) -> str:
     _, live_bar = _live(lv)
     plain = lv.strategy.summary(closed, ctx, live_bar)
     sig = _signal_button(lv)
+    exit_btn = 'exitf' in sig and not (lv.res and lv.res.open_trade)
     if sig:
         out.append(sig)
+        if exit_btn:
+            sig = ""  # after an exit, still show what comes next
+    if sig:
+        pass
     elif any(hot for _, _, hot in plain):
         side = "SELL" if any(hot and lab.startswith("SELL") for lab, _, hot in plain) else "BUY"
         out.append(f'<p class="ready-badge {side.lower()}">GET READY · {side} possible</p>')
@@ -372,11 +377,11 @@ def _alerts(alerts: list[dict]) -> str:
 CSS = """
 :root,[data-theme=dark]{color-scheme:dark;--bg:#0f1318;--surface:#151b22;--raise:#1a2129;--hover:#1f2831;--line:#252e39;--line-2:#323d4a;
 --ink:#e8edf2;--soft:#93a0b1;--faint:#647184;--gold:#d6b25e;--gold-2:#3b3220;--gold-ink:#f0d792;
---up:#3fbf83;--down:#ef6b54;--up-bg:rgba(63,191,131,.13);--down-bg:rgba(239,107,84,.13);--news:#c9a24a;
+--up:#3fbf83;--down:#ef6b54;--exit:#c27c0e;--up-bg:rgba(63,191,131,.13);--down-bg:rgba(239,107,84,.13);--news:#c9a24a;
 --shadow:0 1px 0 rgba(255,255,255,.025) inset,0 12px 32px -18px rgba(0,0,0,.8)}
 [data-theme=light]{color-scheme:light;--bg:#eef1f5;--surface:#ffffff;--raise:#ffffff;--hover:#f5f7fa;--line:#e1e6ec;--line-2:#cfd6df;
 --ink:#121821;--soft:#5a6677;--faint:#8a95a5;--gold:#9a7420;--gold-2:#f3e7c4;--gold-ink:#7a5a12;
---up:#147a4a;--down:#c23a25;--up-bg:#e3f3ea;--down-bg:#fbe7e2;--news:#c99a2e;
+--up:#147a4a;--down:#c23a25;--exit:#b86e00;--up-bg:#e3f3ea;--down-bg:#fbe7e2;--news:#c99a2e;
 --shadow:0 1px 2px rgba(18,24,33,.05),0 10px 28px -16px rgba(18,24,33,.22)}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-padding-top:76px}
 body{margin:0;background:var(--bg);color:var(--ink);font:14.5px/1.5 "Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
@@ -430,6 +435,7 @@ h2,h3,h4{margin:0}
 .act-head{font-weight:700;font-size:16px}.act-body p+p{margin-top:4px}.act-sm{opacity:.85;font-size:13px}
 .act.flash{color:#fff;border:0}.act.flash .act-word{font-size:64px}
 .act.flash.buy{background:var(--up);--fl:var(--up)}.act.flash.sell{background:var(--down);--fl:var(--down)}
+.act.flash.exitf,.sigbtn.exitf{background:var(--exit);--fl:var(--exit)}.act.flash.exitf .act-word{font-size:56px}
 .act.hold .act-word{color:var(--gold)}.act.hold.buy{box-shadow:inset 5px 0 0 var(--up),var(--shadow)}.act.hold.sell{box-shadow:inset 5px 0 0 var(--down),var(--shadow)}
 .act.exit.win .act-word{color:var(--up)}.act.exit.loss .act-word{color:var(--down)}
 
@@ -609,6 +615,20 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 FRESH_MIN = 30  # a new entry signal flashes at the top of the page for this many minutes
 
 
+def _exit_info(t) -> tuple[str, str, str]:
+    """(big word, what happened, what you do) for a closed trade."""
+    if t.exit_reason == "choch":
+        return ("EXIT NOW", "trend broke (change of character)",
+                "Close the remaining contracts <b>at market now</b> on Robinhood. No order is waiting for this exit.")
+    if t.exit_reason == "time":
+        return "EXIT NOW", "end-of-day exit", "Close the position <b>at market now</b> on Robinhood."
+    if t.part_price is not None:
+        return "CLOSED", "runner stopped at entry", "Your stop at entry should have closed the rest. Check Robinhood that you're flat."
+    if t.exit_reason == "target":
+        return "CLOSED", "target hit", "Your limit should have filled. Check Robinhood and <b>cancel the stop order</b>."
+    return "CLOSED", "stop hit", "Your stop should have filled. Check Robinhood and <b>cancel the limit order</b>."
+
+
 def _hold_text(t) -> str:
     if t.runner and t.part_price is not None:
         return (f"Target hit: {1 - t.runner:.0%} is closed. If you took this trade, keep the stop on the rest at your entry "
@@ -623,8 +643,22 @@ def _hold_text(t) -> str:
 def _signal_button(lv) -> str:
     """Blinking BUY / SELL button in the watch panel while a new signal is fresh; HOLD while in a trade."""
     t = lv.res.open_trade if lv.res else None
+    now_ms = time.time() * 1000
     if not t:
+        last = lv.res.trades[-1] if lv.res and lv.res.trades else None
+        if last and last.exit_time and now_ms - (last.exit_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
+            word, why, todo = _exit_info(last)
+            done = _clock(last.exit_time + lv.book.bar_ms)
+            return (f'<div class="sigbtn flash exitf" role="alert" data-sig="exit|{E(lv.watch.name)}|{last.signal_time}">'
+                    f'<span class="sb-word">{"PAPER " if lv.watch.paper else ""}{word}</span>'
+                    f'<span class="sb-lv">{E(why.capitalize())} · {last.points:+.2f} pts at {_px(last.exit_price)}</span>'
+                    f'<span class="sb-sm">{done} · {todo}</span></div>')
         return ""
+    if t.part_time is not None and now_ms - (t.part_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
+        return (f'<div class="sigbtn flash exitf" role="alert" data-sig="part|{E(lv.watch.name)}|{t.signal_time}">'
+                f'<span class="sb-word">MOVE STOP TO {_px(t.entry_price or t.signal_close)}</span>'
+                f'<span class="sb-lv">Target hit: {1 - t.runner:.0%} closed at {_px(t.part_price)}</span>'
+                f'<span class="sb-sm">move the stop on the rest to your entry · then wait for the EXIT alert</span>{_jr(lv, t)}</div>')
     fired = t.signal_time + lv.book.bar_ms
     buy = t.direction > 0
     side = ("PAPER " if lv.watch.paper else "") + ("BUY" if buy else "SELL")
@@ -668,6 +702,12 @@ def _action(lv) -> str:
         buy = t.direction > 0
         below, above = ("below", "above") if buy else ("above", "below")
         mins = max(0, int((now_ms - fired) // 60_000))
+        if t.part_time is not None and now_ms - (t.part_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
+            ago = max(0, int((now_ms - (t.part_time + lv.book.bar_ms)) // 60_000))
+            return f"""<div class="act flash exitf" role="alert">
+  <p class="act-word">MOVE STOP</p>
+  <div class="act-body"><p class="act-head">{name}: target hit {'just now' if ago < 2 else f'{ago} min ago'}, {1 - t.runner:.0%} closed at {_px(t.part_price)}</p>
+  <p>Move the stop on the remaining contracts to your entry <b>{_px(t.entry_price or t.signal_close)}</b>. Then wait for the EXIT alert.</p></div></div>"""
         if mins <= FRESH_MIN:
             return f"""<div class="act flash {'buy' if buy else 'sell'}" role="alert">
   <p class="act-word">{'BUY' if buy else 'SELL'}</p>
@@ -680,12 +720,12 @@ def _action(lv) -> str:
   <p>{_hold_text(t)}</p></div></div>"""
     last = res.trades[-1] if res and res.trades else None
     if last and last.exit_time and now_ms - (last.exit_time + lv.book.bar_ms) <= FRESH_MIN * 60_000:
-        won = (last.points or 0) > 0
-        why = {"target": "target hit", "stop": "stop hit", "time": "end-of-day exit"}.get(last.exit_reason or "", "closed")
-        return f"""<div class="act exit {'win' if won else 'loss'}">
-  <p class="act-word">EXIT</p>
-  <div class="act-body"><p class="act-head">{name}: {why}, {last.points:+.2f} pts</p>
-  <p>{'Close the position now on Robinhood.' if last.exit_reason == 'time' else 'Your stop or limit should have filled. Check Robinhood and cancel the other order.'}</p></div></div>"""
+        word, why, todo = _exit_info(last)
+        ago = max(0, int((now_ms - (last.exit_time + lv.book.bar_ms)) // 60_000))
+        return f"""<div class="act flash exitf" role="alert">
+  <p class="act-word">{word}</p>
+  <div class="act-body"><p class="act-head">{name}: {why}, {last.points:+.2f} pts ({'just now' if ago < 2 else f'{ago} min ago'})</p>
+  <p>{todo}</p></div></div>"""
     inwin = _in_window(lv, now)
     sub = "watching now" if inwin else _window(lv).replace(' and ', '–').replace(' CT', '')
     return f'<span class="chip{" on" if inwin else ""}"><b>{E(lv.watch.name.title())}</b> {sub}</span>'
@@ -928,6 +968,9 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
     acts = [_action(lv) for lv in lives if lv.res]
     title = "Signal Desk"
     for lv, a in zip([lv for lv in lives if lv.res], acts):
+        if 'class="act flash exitf' in a:
+            title = f"{'MOVE STOP' if lv.res.open_trade else 'EXIT'} {lv.symbol} · Signal Desk"
+            break
         if 'class="act flash' in a:
             title = f"{'BUY' if lv.res.open_trade.direction > 0 else 'SELL'} {lv.symbol} · Signal Desk"
             break
