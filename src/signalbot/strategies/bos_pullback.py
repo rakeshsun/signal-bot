@@ -81,11 +81,22 @@ class BosPullback(Strategy):
         stop_atr: float = 0.0  # extra stop room in ATR(14): survives the quick wick after a breakout
         runner: float = 0.0  # fraction kept after the target (0.5 = half off at target, half rides)
         runner_swing: int = 8  # swing size (bars each side) whose break is the runner's CHoCH exit
+        trend_ema: int = 0  # >0: only trade with the trend (BUY above / SELL below this EMA of closes)
         session_start: int = 1800
         session_end: int = 200
         do_long: bool = True
         do_short: bool = True
         skip_bars: str = ""
+
+    def _trend(self, bars: list[Bar]) -> list[float] | None:
+        n = self.p.trend_ema
+        if not n or not bars:
+            return None
+        k, e, out = 2 / (n + 1), bars[0].close, []
+        for b in bars:
+            e += k * (b.close - e)
+            out.append(e)
+        return out
 
     def _in_session(self, t: int) -> bool:
         a, b = self.p.session_start, self.p.session_end
@@ -185,6 +196,7 @@ class BosPullback(Strategy):
         events, _ = self._run(bars)
         skip = {int(x) for x in str(p.skip_bars).replace(" ", "").split(",") if x}
         atr = ta.atr([b.high for b in bars], [b.low for b in bars], [b.close for b in bars], 14) if p.stop_atr else None
+        trend = self._trend(bars)
         for i, ev in enumerate(events):
             if ev is None:
                 continue
@@ -193,6 +205,8 @@ class BosPullback(Strategy):
             if not self._in_session(t) or t in skip or (d == 1 and not p.do_long) or (d == -1 and not p.do_short):
                 continue
             close = bars[i].close
+            if trend is not None and (close - trend[i]) * d <= 0:
+                continue  # against the trend
             stop = pull - d * (p.stop_pad + (p.stop_atr * (atr[i] or 0) if atr else 0))
             risk = (close - stop) * d
             if risk <= 0:
@@ -240,6 +254,11 @@ class BosPullback(Strategy):
         buy = s.d == 1
         side = "BUY" if buy else "SELL"
         cancel = s.ref - p.invalid_ticks * p.tick if buy else s.ref + p.invalid_ticks * p.tick
+        trend = self._trend(bars)
+        if trend is not None and (now - trend[-1]) * s.d <= 0:
+            return [("What to do", f"Nothing. A {side} setup is building, but it's against the trend: gold is "
+                     f"{'below' if buy else 'above'} its {p.trend_ema}-bar average ({trend[-1]:,.1f}), so no {side} alert will come.", False),
+                    ("Trend", f"{'BUY' if now > trend[-1] else 'SELL'} alerts only, while gold stays {'above' if now > trend[-1] else 'below'} {trend[-1]:,.1f}", False)]
         if s.stage == 1:
             back = "down" if buy else "up"
             wait = max(0, p.min_clean - s.clean)
@@ -252,4 +271,6 @@ class BosPullback(Strategy):
             rows.append(("What to do", f"Get ready. Step 2 of 2: retest done, a {side} alert may come soon.", True))
             rows.append((f"{side} alert comes if", f"a {mins}-min bar closes {'above' if buy else 'below'} {s.ext:,.1f} (gold is {now:,.1f} now)", True))
         rows.append(("Setup is off if", f"gold closes {'below' if buy else 'above'} {cancel:,.1f}", False))
+        if trend is not None:
+            rows.append(("Trend", f"{side} alerts only while gold stays {'above' if buy else 'below'} its {p.trend_ema}-bar average ({trend[-1]:,.1f})", False))
         return rows

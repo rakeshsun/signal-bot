@@ -188,3 +188,21 @@ def test_runner_stop_moves_to_entry_after_target():
     t = simulate(bars, sigs, structure=([None] * 5, [None] * 5, 2)).trades[0]
     assert t.exit_reason == "stop" and t.exit_price == 100  # stopped at entry, not at 98
     assert t.points == 1.0  # half +2, half 0
+
+
+def test_bos_trend_filter_only_trades_with_the_trend():
+    from signalbot.strategies.base import Context as Ctx
+
+    c, v = random_walk()
+    B = strategies.get("bos_pullback")
+    allday = {"session_start": 0, "session_end": 2400}
+    removed = 0
+    for series in (c, [2 * c[0] - x for x in c]):  # the walk and its mirror image
+        bs = make_bars(series, vol=v)
+        s = B(B.make_params({**allday, "trend_ema": 200}))
+        ema = s._trend(bs)
+        sigs = [(i, x) for i, x in enumerate(s.signals(bs, Ctx("X"))) if x]
+        unfiltered = [x for x in B(B.make_params(allday)).signals(bs, Ctx("X")) if x]
+        assert all((bs[i].close - ema[i]) * x.direction > 0 for i, x in sigs)
+        removed += len(unfiltered) - len(sigs)
+    assert removed > 0
