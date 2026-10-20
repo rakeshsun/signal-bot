@@ -208,3 +208,22 @@ def test_size_sets_runner_contracts_and_alert_totals():
     assert "2 /MGCZ26 closed +20.00 pts = +$400" in messages.partial(t, w, "/GCZ6")[1]
     t.exit_price, t.exit_reason, t.exit_index = 4230.0, "choch", 9
     assert "4 /MGCZ26: +$1,200 total" in messages.exit_(t, w, "/GCZ6")[1]
+
+
+def test_wait_history_stops_when_bars_go_quiet(monkeypatch):
+    import signalbot.runner as rn
+
+    book = FakeBook(make_bars(*random_walk()[:1]))
+    book.ready = asyncio.Event()  # the "done" flag never comes
+    book.last_update = 1.0
+    clock = iter(range(0, 1000))
+    monkeypatch.setattr(rn.time, "monotonic", lambda: float(next(clock)))
+    lv = _live(book.bars)
+    lv.book = book
+
+    async def nosleep(_):
+        return None
+
+    monkeypatch.setattr(rn.asyncio, "sleep", nosleep)
+    asyncio.run(rn._wait_history(lv, timeout=180, quiet=8))
+    assert next(clock) < 30  # returned after the quiet period, not the 180 s timeout

@@ -199,13 +199,26 @@ async def _start_watch(s: Settings, session, w: Watch) -> Live:
     return Live(w, strat, inst.symbol, inst, book, task)
 
 
+async def _wait_history(lv: Live, timeout: float = 180, quiet: float = 8) -> None:
+    """Until the history snapshot is complete, or bars stopped arriving for ``quiet`` seconds
+    (tastytrade caps history at ~8,000 bars and then never sends its "done" flag)."""
+    start = time.monotonic()
+    while not lv.book.ready.is_set():
+        now = time.monotonic()
+        last = getattr(lv.book, "last_update", 0.0)
+        if len(lv.book) > 0 and last and now - last > quiet:
+            log.info("%s: history loaded (%d bars)", lv.watch.name, len(lv.book))
+            return
+        if now - start > timeout:
+            log.warning("%s: history snapshot incomplete after %.0fs, continuing with %d bars", lv.watch.name, timeout, len(lv.book))
+            return
+        await asyncio.sleep(1)
+
+
 async def _baseline(lv: Live, nd: dict[date, str], sent: SentLog) -> None:
     """After (re)start: everything before the last closed bar counts as already handled; the
     last bar is left to the loop, so a restart right after a signal still delivers it."""
-    try:
-        await asyncio.wait_for(lv.book.ready.wait(), timeout=180)
-    except TimeoutError:
-        log.warning("%s: history snapshot incomplete after 180s, continuing with %d bars", lv.watch.name, len(lv.book))
+    await _wait_history(lv)
     bars = lv.book.closed_bars()
     lv.res = evaluate(lv.strategy, bars, Context(lv.symbol, nd))
     last = bars[-1].time if bars else 0
