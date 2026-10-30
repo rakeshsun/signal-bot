@@ -88,6 +88,20 @@ def entry(t: Trade, w: Watch, symbol: str, res: Result, bar_ms: int) -> tuple[st
     return f"{tag}{levels} | {symbol} {w.name}", "\n".join(lines)
 
 
+def missed_entry(t: Trade, w: Watch, symbol: str, bar_ms: int) -> tuple[str, str]:
+    """A signal that fired while the bot was offline (Mac asleep, no data) and is still open."""
+    side = "LONG" if t.direction > 0 else "SHORT"
+    when = datetime.fromtimestamp((t.signal_time + bar_ms) / 1000, tz=CHICAGO).strftime("%a %I:%M %p CT")
+    entry_px = t.entry_price or t.signal_close
+    lines = [
+        f"The bot was offline when this signal fired ({when}). The trade is still open in the backtest:",
+        f"{side} from {_px(entry_px)} | SL {_px(t.active_stop)} | TP {_px(t.target)}",
+        "Don't enter now unless price is still near the entry. If you're already in it, keep your stop and target;",
+        "the target / stop / exit alerts for it will come as usual.",
+    ]
+    return f"{'PAPER ' if w.paper else ''}MISSED {side} (still open) | {symbol} {w.name}", "\n".join(lines)
+
+
 def partial(t: Trade, w: Watch, symbol: str) -> tuple[str, str]:
     """Runner trades: the target took the first part off; the rest keeps going."""
     entry_px = t.entry_price or t.signal_close

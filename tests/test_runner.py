@@ -227,3 +227,13 @@ def test_wait_history_stops_when_bars_go_quiet(monkeypatch):
     monkeypatch.setattr(rn.asyncio, "sleep", nosleep)
     asyncio.run(rn._wait_history(lv, timeout=180, quiet=8))
     assert next(clock) < 30  # returned after the quiet period, not the 180 s timeout
+
+
+def test_missed_entry_message_for_trade_still_open():
+    from signalbot import messages
+    from signalbot.engine import Trade
+
+    w = Watch(name="gold-bos-15", strategy="bos_pullback", contracts={"/MGC": 10}, paper=True)
+    t = Trade(-1, 0, 1793278800000, 4030.7, 4063.1, 4006.4, {}, 1, 4030.5)
+    title, body = messages.missed_entry(t, w, "/GCZ6", 900_000)
+    assert title.startswith("PAPER MISSED SHORT (still open)") and "SL 4,063.1" in body and "TP 4,006.4" in body

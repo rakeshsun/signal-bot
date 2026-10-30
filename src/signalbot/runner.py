@@ -325,6 +325,11 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
                         continue
                     if ev.kind == "entry":
                         if ev.bar_index < n - 2:  # an entry older than one bar is no longer actionable
+                            if ev.trade.is_open:
+                                # missed while the bot was offline / asleep, but the trade is still running:
+                                # say so, and the partial / exit alerts that follow are sent normally
+                                title, body = messages.missed_entry(ev.trade, lv.watch, lv.symbol, lv.book.bar_ms)
+                                await alerts.send(key, title, body, urgent=True, kind="entry")
                             continue
                         title, body = messages.entry(ev.trade, lv.watch, lv.symbol, lv.res, lv.book.bar_ms)
                         await alerts.send(key, title, body, urgent=True, kind="entry")
