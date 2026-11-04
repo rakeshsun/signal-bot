@@ -683,7 +683,10 @@ def _signal_button(lv) -> str:
     buy = t.direction > 0
     side = ("PAPER " if lv.watch.paper else "") + ("BUY" if buy else "SELL")
     mins = max(0, int((time.time() * 1000 - fired) // 60_000))
-    levels = f"Entry {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}"
+    # after the fill, show the real entry (next bar's open); before it, the signal bar's close
+    filled = t.entry_price is not None
+    levels = (f"Filled {_px(t.entry_price)} (signal {_px(t.signal_close)}) · SL {_px(t.stop)} · TP {_px(t.target)}" if filled
+              else f"Signal {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}")
     if t.runner:
         levels += f" ({1 - t.runner:.0%} off, rest rides)"
     if t.part_price is not None:
