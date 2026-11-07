@@ -293,9 +293,9 @@ def _contract(lv) -> dict:
     sym = lv.symbol or ""
     exp = getattr(lv.inst, "expires", None)
     out = {"sym": sym, "month": "", "expires": "", "days": None, "soon": False}
-    m = re.fullmatch(r"/([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d)", sym.upper())
-    if m and exp:
-        out["month"] = f"{MONTHS[m.group(2)]} {exp.year}"
+    m = re.fullmatch(r"/([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,4})", sym.upper())
+    if exp:
+        out["month"] = exp.strftime("%b %Y")
     elif m:
         out["month"] = MONTHS[m.group(2)]
     if exp:
@@ -644,6 +644,7 @@ h2,h3,h4{margin:0}
 .tk-sym{color:var(--soft);font-weight:600;font-size:12px;letter-spacing:.04em}
 .contract{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-2);border-radius:var(--r);padding:2px 6px;white-space:nowrap}
 .contract.soon{color:var(--exit);border-color:var(--exit)}
+.tk-feed{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;cursor:help}
 .w-pnl{text-transform:none;letter-spacing:0}
 .tk-px{font:700 22px/1 var(--mono);letter-spacing:-.03em;color:var(--ink-2)}
 .tk-chg{font-weight:700;font-size:14px}.tk-note{color:var(--faint);font-size:12px}
@@ -1264,7 +1265,11 @@ def _ticker(lives) -> str:
         start -= timedelta(days=1)
     first = next((b for b in bars if b.time >= start.timestamp() * 1000), None)
     chg = (px - first.open) if first else 0.0
-    return (f'<div class="tick"><span class="tk-sym">{E(lv.symbol)}</span>{_contract_line(lv)}'
+    traded = next(iter(contract_names(lv.watch, lv.symbol)), lv.symbol)
+    feed = ("" if traded == lv.symbol else
+            f'<span class="tk-feed" title="Price streamed from the full-size contract - '
+            f'{E(traded)} trades at the same price">{E(lv.symbol)} feed</span>')
+    return (f'<div class="tick"><span class="tk-sym">{E(traded)}</span>{_contract_line(lv)}{feed}'
             f'<span class="tk-px">{_px(px)}</span>'
             f'<span class="tk-chg {"up" if chg >= 0 else "down"}">{"▲" if chg >= 0 else "▼"} {abs(chg):,.1f}</span>'
             f'<span class="tk-note">{"live" if live_px is not None else "last close"}, since 5 PM open</span></div>')
