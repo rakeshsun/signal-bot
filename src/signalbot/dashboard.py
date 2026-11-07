@@ -411,11 +411,15 @@ def _alerts(alerts: list[dict]) -> str:
 
 # ── performance ──────────────────────────────────────────────────────────────
 
-def _closed(lives):
-    """Every closed trade across all watches, oldest first: (exit_ms, pts, usd_per_micro, watch)."""
+def _slug(name: str) -> str:
+    return "w-" + "".join(c if c.isalnum() else "-" for c in name.lower())
+
+
+def _closed(lives, only=None):
+    """Every closed trade, oldest first: (exit_ms, pts, usd_per_micro, watch). `only` filters to one slug."""
     out = []
     for lv in lives:
-        if not lv.res:
+        if not lv.res or (only and _slug(lv.watch.name) != only):
             continue
         ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
         for t in lv.res.trades:
@@ -534,7 +538,7 @@ def _by_watch(lives) -> str:
         thin = a["n"] < THIN
         tcls = " thin" if thin else ""
         mark = ' <abbr class="tn" title="Too few signals to read anything into - see the note below">thin</abbr>' if thin else ""
-        body += (f'<tr data-slug="w-{"".join(c if c.isalnum() else "-" for c in name.lower())}">'
+        body += (f'<tr data-slug="{_slug(name)}">'
                  f'<th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}{mark}</td>'
                  f'<td class="num{tcls}">{a["win"]:.0f}%</td><td class="num{tcls}">{_pf(a["pf"])}</td>'
                  f'<td class="num {cls}{tcls}">{a["pts"]:+.1f}</td>'
@@ -545,9 +549,19 @@ def _by_watch(lives) -> str:
 
 
 def _perf(lives, now_ct) -> str:
-    rows = _closed(lives)
-    if not rows:
+    if not _closed(lives):
         return ""
+    views = _perf_view(_closed(lives), now_ct, "every signal, all strategies", "all", _by_watch(lives))
+    for lv in lives:
+        sl = _slug(lv.watch.name)
+        r = _closed(lives, sl)
+        views += _perf_view(r, now_ct, E(lv.watch.name.title()), sl, "") if r else (
+            f'<div class="pf-view" data-slug="{sl}" hidden>'
+            f'<p class="muted ch-empty">No closed signals yet for {E(lv.watch.name.title())}.</p></div>')
+    return f'<section class="panel perf" id="perf"><h2>Performance</h2>{views}</section>'
+
+
+def _perf_view(rows, now_ct, what: str, slug: str, extra: str) -> str:
     now_ms = now_ct.timestamp() * 1000
     d30, d60 = now_ms - 30 * 86_400_000, now_ms - 60 * 86_400_000
     a, b = _agg([r for r in rows if r[0] >= d30]), _agg([r for r in rows if d60 <= r[0] < d30])
@@ -561,19 +575,23 @@ def _perf(lives, now_ct) -> str:
         _tile("Net", f'{a["pts"]:+.0f} pts', _delta(a["pts"], b["pts"], " pts", whole=True),
               f'{_usd(a["usd"])} per micro'),
     ])
-    return (f'<section class="panel perf" id="perf"><h2>Performance</h2>'
+    thin = ('' if allt["n"] >= THIN else
+            f'<p class="perf-all muted small">Under {THIN} signals, so none of this is a verdict: at 8 signals a '
+            f'true 60% strategy shows anywhere from 26% to 94% of the time. Judge it on its full backtest.</p>')
+    note = ('' if not extra else
+            f'<p class="perf-all muted small">A row marked <b>thin</b> has under {THIN} signals, which is not '
+            f'enough to judge anything. Judge a strategy on its full backtest and a few hundred signals, '
+            f'not on one quiet month.</p>')
+    return (f'<div class="pf-view" data-slug="{slug}"{"" if slug == "all" else " hidden"}>'
             f'<div class="tiles">{tiles}</div>'
             f'<h3 class="eq-h">Cumulative result '
-            f'<span class="muted">· every signal, all strategies, {span:.0f} days</span></h3>'
+            f'<span class="muted">· {what}, {span:.0f} days</span></h3>'
             f'{_equity(rows)}'
             f'<p class="perf-all muted small">All {allt["n"]} signals in the loaded history: '
             f'{allt["win"]:.0f}% won, profit factor {_pf(allt["pf"])}, {allt["pts"]:+.1f} pts '
             f'({_usd(allt["usd"])} per micro). Simulated from the bars the bot holds, not your own fills - '
             f'mark signals <b>Took it</b> or <b>Skipped</b> to track what you actually traded.</p>'
-            f'<p class="perf-all muted small">A row marked <b>thin</b> has under {THIN} signals, which is not '
-            f'enough to judge anything: at 8 signals a true 60% strategy shows anywhere from 26% to 94% of the time. '
-            f'Judge a strategy on its full backtest and a few hundred signals, not on one quiet month.</p>'
-            f'{_by_watch(lives)}</section>')
+            f'{thin}{note}{extra}</div>')
 
 
 CSS = """
@@ -1132,7 +1150,7 @@ def _trades_json(lives) -> str:
             continue
         ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
         for t in lv.res.trades[-40:]:
-            rows.append({"k": f"{lv.watch.name}|{t.signal_time}", "w": lv.watch.name.title(), "paper": lv.watch.paper,
+            rows.append({"k": f"{lv.watch.name}|{t.signal_time}", "w": lv.watch.name.title(), "s": _slug(lv.watch.name), "paper": lv.watch.paper,
                          "t": t.signal_time + lv.book.bar_ms, "side": "Long" if t.direction > 0 else "Short",
                          "entry": t.entry_price or t.signal_close, "pts": t.points, "usd": None if t.points is None else round(t.points * ppt, 2),
                          "res": t.exit_reason or "open"})
@@ -1163,7 +1181,7 @@ def _jump(lives) -> str:
 def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     items = []
     for lv in lives:
-        slug = "w-" + "".join(c if c.isalnum() else "-" for c in lv.watch.name.lower())
+        slug = _slug(lv.watch.name)
         label, cls, _, _ = _state(lv, now_ct) if lv.res else ("Waiting for data", "off", False, False)
         items.append(f'<a class="ri {cls}" href="#{slug}" data-slug="{slug}"><span class="ri-dot"></span><span class="ri-name">{E(lv.watch.name.title())}'
                      f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}</span></a>')
@@ -1327,8 +1345,9 @@ function checkSignal(){D.querySelectorAll('[data-sig]').forEach(function(e){var 
 function money(v){return (v<0?'-$':'+$')+Math.abs(v).toFixed(0)}
 function jrPaint(){D.querySelectorAll('.jr[data-k]').forEach(function(el){var c=(journal[el.dataset.k]||{}).choice||'';el.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b.dataset.c===c)})});
  var body=D.getElementById('jr-body');if(!body||!HTTP)return;var rows=[];try{rows=JSON.parse(D.getElementById('trades-data').textContent)}catch(x){}
- var mine=rows.filter(function(r){return journal[r.k]}).sort(function(a,b){return b.t-a.t});
- if(!mine.length){body.innerHTML='<p class="muted">Mark a signal with <b>Took it</b> or <b>Skipped</b> (on the signal or in Recent trades) to start your journal.</p>';return}
+ var fz=focusOf();
+ var mine=rows.filter(function(r){return journal[r.k]&&(!fz||r.s===fz)}).sort(function(a,b){return b.t-a.t});
+ if(!mine.length){body.innerHTML=fz?'<p class="muted">Nothing marked for this strategy yet.</p>':'<p class="muted">Mark a signal with <b>Took it</b> or <b>Skipped</b> (on the signal or in Recent trades) to start your journal.</p>';return}
  var took=mine.filter(function(r){return journal[r.k].choice==='took'}),sk=mine.filter(function(r){return journal[r.k].choice==='skipped'});
  function sum(a){return a.reduce(function(s,r){return s+(r.usd||0)},0)}
  var h='<p class="jr-sum">Took <b>'+took.length+'</b>: '+money(sum(took))+' per micro if filled like the bot. Skipped <b>'+sk.length+'</b>: those would have made '+money(sum(sk))+'.</p><table class="tt jt"><thead><tr><th>Signal</th><th>Strategy</th><th>Side</th><th>Result</th><th class="num">$ per micro</th><th>You</th></tr></thead><tbody>';
@@ -1345,12 +1364,17 @@ function applyFocus(){var f=focusOf(),bar=D.querySelector('.focusbar'),name='';
    tr.hidden=!!f&&tr.dataset.slug!==f});
  D.querySelectorAll('.ri[data-slug]').forEach(function(a){
    a.classList.toggle('sel',a.dataset.slug===(f||'all'))});
- if(bar){bar.hidden=!f;var b=bar.querySelector('.fb-n');if(b)b.textContent=name}}
+ D.querySelectorAll('.pf-view').forEach(function(v){v.hidden=v.dataset.slug!==(f||'all')});
+ if(bar){bar.hidden=!f;var b=bar.querySelector('.fb-n');if(b)b.textContent=name}
+ jrPaint()}
 function focusBind(){
  D.querySelectorAll('.wt tbody tr[data-slug]').forEach(function(tr){
    tr.onclick=function(){location.hash=tr.dataset.slug}});
- if(!window.__fh){window.__fh=1;window.addEventListener('hashchange',applyFocus)}}
-function eqBind(){var f=D.querySelector('.eq[data-eq]');if(!f)return;
+ if(!window.__fh){window.__fh=1;window.addEventListener('hashchange',function(){applyFocus();
+  /* the hash would otherwise scroll the card into view, past the hero and its numbers */
+  try{window.scrollTo({top:0,behavior:'smooth'})}catch(e){window.scrollTo(0,0)}})}}
+function eqBind(){D.querySelectorAll('.eq[data-eq]').forEach(eqOne)}
+function eqOne(f){
  var pts;try{pts=JSON.parse(f.dataset.eq)}catch(e){return}
  var svg=f.querySelector('svg'),cross=f.querySelector('.eq-cross'),cx=f.querySelector('.eq-cx'),
      cd=f.querySelector('.eq-cd'),tip=f.querySelector('.eq-tip');
@@ -1373,7 +1397,7 @@ function jrLoad(){if(!HTTP){D.querySelectorAll('.jr').forEach(function(e){e.hidd
  fetch('/api/journal'+Q,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}
 function jrBind(){D.querySelectorAll('.jr[data-k] button').forEach(function(b){b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();var k=b.closest('.jr').dataset.k,c=b.classList.contains('on')?'':b.dataset.c;
  fetch('/api/journal'+Q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,choice:c})}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}})}
-function init(){restore();theme();soundBtn();jrBind();jrPaint();eqBind();focusBind();applyFocus();tick();stale();checkSignal()}
+function init(){restore();theme();soundBtn();jrBind();eqBind();focusBind();applyFocus();tick();stale();checkSignal()}
 window._bt=D.title;init();jrLoad();setInterval(tick,1000);setInterval(stale,20000);
 setInterval(function(){var f=D.querySelector('.act.flash');if(!f){D.title=window._bt;return}D.title=D.title.indexOf('🔔')===0?window._bt:'🔔 '+window._bt},900);
 if(HTTP){setInterval(function(){fetch(location.pathname+Q,{cache:'no-store'}).then(function(r){return r.text()}).then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');
