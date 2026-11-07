@@ -314,6 +314,12 @@ def _state(lv, now_ct):
     return f"Opens {_window(lv).split(' and ')[0]}", "off", False, False
 
 
+def _cd(lv, now_ct) -> str:
+    """Just the live countdown chip, for places that supply their own wording."""
+    t = _next_open_ms(lv, now_ct)
+    return f'in <span class="cd" data-t="{t}">–</span>' if t else "open now"
+
+
 def _opens_in(lv, now_ct) -> str:
     t = _next_open_ms(lv, now_ct)
     return f' · in <span class="cd" data-t="{t}">–</span>' if t else ""
@@ -331,7 +337,7 @@ def _watch(lv, nd) -> str:
     label, cls, is_open, force = _state(lv, now_ct)
     st = _stats(lv)
     key = f"w:{w.name}:{'open' if is_open else 'shut'}"
-    pf_cls = "up" if st["pf"] is None or st["pf"] >= 1 else "down"
+    pf_cls = "" if st["pf"] is None else ("up" if st["pf"] >= 1 else "down")
     return f"""<details class="watch {cls}" id="{slug}" data-key="{E(key)}"{' data-force="1"' if force else ''}{' open' if is_open else ''}>
   <summary class="wh">
     <span class="w-id"><span class="w-name">{E(w.name.title())}</span>{'<span class="paper">Paper</span>' if w.paper else '<span class="live-tag">Live</span>'}</span>
@@ -612,10 +618,19 @@ h2,h3,h4{margin:0}
 .rn.hot{color:var(--ink);background:color-mix(in srgb,var(--news) 16%,transparent);border-radius:8px;padding:8px 10px}
 
 /* hero */
-.main{min-width:0;display:flex;flex-direction:column;gap:14px}
-.hero.calm{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 20px;padding:18px 22px;border-radius:16px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
-.h-word{margin:0;font:800 28px/1 "Archivo",sans-serif;font-stretch:125%;color:var(--soft);letter-spacing:-.01em}
-.h-sub{margin:0;color:var(--soft);font-size:14px;flex:1 1 360px}.h-sub b{color:var(--ink)}
+.main{min-width:0;display:flex;flex-direction:column;gap:12px}
+.hero.calm{display:grid;gap:14px;padding:16px 18px;border-radius:16px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.h-top{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 16px}
+.h-word{margin:0;font:800 22px/1.1 "Archivo",sans-serif;font-stretch:118%;color:var(--ink);letter-spacing:-.01em}
+.h-sub{margin:0;color:var(--soft);font-size:14px}.h-sub b{color:var(--ink)}
+.h-note{margin:0;color:var(--faint);font-size:12.5px;flex:1 1 100%}
+.nextup{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:8px}
+.nu{display:grid;gap:1px;padding:9px 11px;border-radius:11px;background:var(--raise);border:1px solid var(--line)}
+.nu.on{background:var(--gold-2);border-color:transparent}
+.nu-n{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nu-w{font-size:11.5px;color:var(--faint)}
+.nu-c{font-size:12.5px;font-weight:600;color:var(--soft)}
+.nu.on .nu-n,.nu.on .nu-c{color:var(--gold-ink)}.nu.on .nu-w{color:var(--gold-ink);opacity:.8}
 .hero{display:grid;gap:12px}
 .act{display:grid;grid-template-columns:minmax(150px,auto) minmax(0,1fr);gap:6px 24px;align-items:center;border-radius:16px;padding:18px 24px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow)}
 .act p{margin:0}.act-word{font:800 46px/1 "Archivo",sans-serif;font-stretch:125%}
@@ -627,26 +642,30 @@ h2,h3,h4{margin:0}
 .act.exit.win .act-word{color:var(--up)}.act.exit.loss .act-word{color:var(--down)}
 
 /* strategy panels */
-details.watch,section.watch{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
-details.watch.on{border-color:color-mix(in srgb,var(--gold) 45%,var(--line))}
-details.watch.long{border-color:color-mix(in srgb,var(--up) 55%,var(--line))}details.watch.short{border-color:color-mix(in srgb,var(--down) 55%,var(--line))}
-.wh{list-style:none;display:grid;grid-template-columns:auto auto minmax(0,1fr) 18px;align-items:center;gap:16px;padding:14px 20px;cursor:pointer}
+.watches{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+details.watch,section.watch{background:transparent;border:0;border-radius:0;box-shadow:none;overflow:hidden}
+.watches>details.watch+details.watch,.watches>section.watch+section.watch{border-top:1px solid var(--line)}
+details.watch[open]{background:var(--raise)}
+details.watch.on>summary{box-shadow:inset 3px 0 0 var(--gold)}
+details.watch.long>summary{box-shadow:inset 3px 0 0 var(--up)}
+details.watch.short>summary{box-shadow:inset 3px 0 0 var(--down)}
+.wh{list-style:none;display:grid;grid-template-columns:auto auto minmax(0,1fr) 18px;align-items:center;gap:14px;padding:11px 18px;cursor:pointer}
 section.watch .wh{cursor:default;grid-template-columns:auto auto}
 .wh::-webkit-details-marker{display:none}
 details.watch>summary:hover{background:var(--hover)}
 details.watch[open]>summary{border-bottom:1px solid var(--line)}
 .w-id{display:flex;align-items:center;gap:8px}
-.w-name{font:750 18px/1.1 "Archivo",sans-serif;font-stretch:118%;letter-spacing:-.01em;white-space:nowrap}
+.w-name{font:750 16px/1.1 "Archivo",sans-serif;font-stretch:118%;letter-spacing:-.01em;white-space:nowrap}
 .paper,.live-tag{font-size:11px;font-weight:600;border-radius:6px;padding:2px 7px;letter-spacing:.01em}
 .paper{color:var(--soft);border:1px solid var(--line-2)}.live-tag{color:var(--gold-ink);background:var(--gold-2)}
-.w-state{justify-self:start;font-size:13px;font-weight:600;border-radius:999px;padding:4px 11px;white-space:nowrap;color:var(--soft);background:var(--hover);border:1px solid var(--line)}
+.w-state{justify-self:start;font-size:12.5px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;color:var(--soft);background:var(--hover);border:1px solid var(--line)}
 .w-state.on{color:var(--gold-ink);background:var(--gold-2);border-color:transparent}
 .w-state.long{color:var(--up);background:var(--up-bg);border-color:transparent}.w-state.short{color:var(--down);background:var(--down-bg);border-color:transparent}
 .w-stats{justify-self:end;display:flex;gap:18px;color:var(--faint);font-size:12px;white-space:nowrap}
 .w-stats b{color:var(--ink);font-weight:700;font-size:14px;margin-right:3px}.w-stats b.up{color:var(--up)}.w-stats b.down{color:var(--down)}
 .chev{width:9px;height:9px;border-right:2px solid var(--soft);border-bottom:2px solid var(--soft);transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s ease;justify-self:center}
 details.watch[open]>summary .chev{transform:rotate(225deg) translate(-2px,-2px)}
-.w-body{padding:18px 20px 16px}
+.w-body{padding:16px 18px 14px}
 .cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px}
 .col-a,.col-b{min-width:0}
 h3{font-size:12px;font-weight:600;color:var(--faint);margin:0 0 10px}
@@ -825,7 +844,8 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
   .tk-note{display:none}}
 @media (max-width:820px){.cols{grid-template-columns:minmax(0,1fr);gap:18px}.w-stats{display:none}.wh{grid-template-columns:auto minmax(0,1fr) 18px}}
 @media (max-width:620px){.top-in{flex-wrap:wrap;gap:8px 16px;padding:10px 16px}.tick{border-left:0;padding-left:0}.status{margin-left:0;width:100%;flex-wrap:wrap;gap:6px 10px;white-space:normal}.status #upd{flex:1 1 auto}.tbtn{padding:5px 8px}
-  .shell{padding:14px 12px 40px}.wh{grid-template-columns:minmax(0,1fr) 18px;gap:8px 10px;padding:12px 14px}.w-state{grid-column:1;grid-row:2}
+  .shell{padding:14px 12px 40px}.wh{grid-template-columns:minmax(0,1fr) 18px;gap:6px 10px;padding:11px 14px}.w-state{grid-column:1;grid-row:2}
+  .nextup{grid-template-columns:repeat(2,minmax(0,1fr))}.h-word{font-size:20px}
   .w-body{padding:14px}.act{grid-template-columns:minmax(0,1fr);padding:16px}.act.flash .act-word{font-size:46px}
   .tt th:nth-child(4),.tt td:nth-child(4){display:none}.pos.long,.pos.short{grid-template-columns:minmax(0,1fr)}.ladder{min-height:140px}
   .h-word{font-size:24px}}
@@ -1071,12 +1091,12 @@ def _today(lives, now_ct) -> str:
                 pts += t.points
                 usd += t.points * ppt
     if not n:
-        return '<p class="today">Today: no signals yet.</p>'
+        return "No signals today yet"
     parts = [f"<b>{n}</b> signal{'s' if n != 1 else ''}", f"<b>{won}</b> won", f"<b>{lost}</b> lost"]
     if open_n:
         parts.append(f"<b>{open_n}</b> open")
-    return (f'<p class="today">Today: {", ".join(parts)}. Paper result <b class="{"up" if pts >= 0 else "down"}">'
-            f'{pts:+.1f} pts ({_usd(usd)} per micro)</b>.</p>')
+    cls = "up" if pts >= 0 else "down"
+    return f'Today {", ".join(parts)} · <b class="{cls}">{pts:+.1f} pts</b> ({_usd(usd)} per micro)'
 
 
 def _trades_json(lives) -> str:
@@ -1120,7 +1140,7 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
         slug = "w-" + "".join(c if c.isalnum() else "-" for c in lv.watch.name.lower())
         label, cls, _, _ = _state(lv, now_ct) if lv.res else ("Waiting for data", "off", False, False)
         items.append(f'<a class="ri {cls}" href="#{slug}"><span class="ri-dot"></span><span class="ri-name">{E(lv.watch.name.title())}'
-                     f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}{_opens_in(lv, now_ct) if cls == "off" else ""}</span></a>')
+                     f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}</span></a>')
     if news_today:
         news = f'<p class="rn hot"><b>{_nl(now_ct.date(), E(news_today) + " today, 7:30 CT")}.</b> Gold takes no new entries 7:00–8:00.</p>'
     elif upcoming:
@@ -1186,8 +1206,20 @@ def _hero(lives, acts) -> str:
         parts.append(", ".join(f"<b>{E(lv.watch.name.title())}</b> is watching until {_window(lv).split(' and ')[1].replace(' CT', '')}" for lv in watching))
     if later:
         parts.append("next: " + ", ".join(f"{E(lv.watch.name.title())} at {_window(lv).split(' and ')[0]}{_opens_in(lv, now_ct)}" for lv in later))
-    return (f'<section class="hero calm"><p class="h-word">No action</p>'
-            f'<p class="h-sub">{"; ".join(parts) or "No strategies running."}. You will get a phone alert the moment a signal fires.</p></section>')
+    cells = ""
+    for lv in watching + later:
+        live = lv in watching
+        when = _window(lv).split(" and ")[1 if live else 0].replace(" CT", "")
+        cd = _cd(lv, now_ct)
+        cells += (f'<div class="nu{" on" if live else ""}"><span class="nu-n">{E(lv.watch.name.title())}</span>'
+                  f'<span class="nu-w">{"closes" if live else "opens"} {when}</span>'
+                  f'<span class="nu-c">{cd}</span></div>')
+    head = f"{len(watching)} watching now" if watching else "Nothing open"
+    return (f'<section class="hero calm">'
+            f'<div class="h-top"><p class="h-word">No action</p>'
+            f'<p class="h-sub">{head} · {_today(lives, now_ct)}</p>'
+            f'<p class="h-note">A phone alert goes out the moment a signal fires.</p></div>'
+            f'<div class="nextup">{cells}</div></section>')
 
 
 def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool, info=None,
@@ -1230,9 +1262,8 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 {_rail(lives, now_ct, upcoming, news_today, info or {})}
 <main class="main">
 {_hero(lives, acts)}
-{_today(lives, now_ct)}
 {_perf(lives, now_ct)}
-{watches}
+<section class="watches">{watches}</section>
 <section class="panel journal" id="journal"><h2>My journal</h2><div id="jr-body"></div></section>
 <section class="panel activity" id="activity"><h2>Activity</h2>{_alerts(alerts)}</section>
 <p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)} · up {_uptime(started)} · {'watchdog on' if watchdog else 'no watchdog'}. Updates every 10 seconds.{phone}</p>
