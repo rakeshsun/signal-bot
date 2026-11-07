@@ -32,6 +32,15 @@ def _clock(ms_or_s: float) -> str:
     return _dt(ms_or_s).strftime("%-I:%M %p")
 
 
+def _uptime(started: float) -> str:
+    """How long the bot has been up: '41m' / '4h 12m' / '3d 6h'."""
+    m = max(0, int((time.time() - started) // 60))
+    if m < 60:
+        return f"{m}m"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m" if h < 24 else f"{h // 24}d {h % 24}h"
+
+
 def _day(ms_or_s: float) -> str:
     d = _dt(ms_or_s)
     today = datetime.now(CHICAGO).date()
@@ -282,7 +291,7 @@ def _stats(lv):
     names = contract_names(lv.watch, lv.symbol)
     first = next(iter(names.items()), None)
     days = max(1, len(lv.res.bars) * lv.book.bar_ms // 86_400_000)
-    return {"n": len(closed), "wins": wins, "pf": (gw / gl) if gl else 0.0, "net": gw - gl,
+    return {"n": len(closed), "wins": wins, "pf": (gw / gl) if gl else None, "net": gw - gl,
             "usd": _usd((gw - gl) * first[1]) if first else "", "unit": first[0] if first else "", "days": days}
 
 
@@ -322,13 +331,13 @@ def _watch(lv, nd) -> str:
     label, cls, is_open, force = _state(lv, now_ct)
     st = _stats(lv)
     key = f"w:{w.name}:{'open' if is_open else 'shut'}"
-    pf_cls = "up" if st["pf"] >= 1 else "down"
+    pf_cls = "up" if st["pf"] is None or st["pf"] >= 1 else "down"
     return f"""<details class="watch {cls}" id="{slug}" data-key="{E(key)}"{' data-force="1"' if force else ''}{' open' if is_open else ''}>
   <summary class="wh">
     <span class="w-id"><span class="w-name">{E(w.name.title())}</span>{'<span class="paper">Paper</span>' if w.paper else '<span class="live-tag">Live</span>'}</span>
     <span class="w-state {cls}">{E(label)}{_opens_in(lv, now_ct) if cls == "off" else ""}</span>
     <span class="w-stats" title="Last {st['days']} days in the loaded history">
-      <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{st['pf']:.2f}</b> PF</span><span><b class="{'up' if st['net'] >= 0 else 'down'}">{st['usd']}</b> per {E(st['unit'])}</span>
+      <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{_pf(st['pf'])}</b> PF</span><span><b class="{'up' if st['net'] >= 0 else 'down'}">{st['usd']}</b> per {E(st['unit'])}</span>
     </span>
     <span class="chev" aria-hidden="true"></span>
   </summary>
@@ -391,6 +400,164 @@ def _alerts(alerts: list[dict]) -> str:
         out += (f'<details class="earlier" data-key="alerts-earlier"><summary>Earlier ({len(earlier)})</summary>'
                 f'<ol class="alerts">{"".join(earlier)}</ol></details>')
     return out
+
+
+
+# ── performance ──────────────────────────────────────────────────────────────
+
+def _closed(lives):
+    """Every closed trade across all watches, oldest first: (exit_ms, pts, usd_per_micro, watch)."""
+    out = []
+    for lv in lives:
+        if not lv.res:
+            continue
+        ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
+        for t in lv.res.trades:
+            if t.is_open or t.points is None:
+                continue
+            out.append(((t.exit_time or t.signal_time) + lv.book.bar_ms, t.points, t.points * ppt, lv.watch.name))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def _agg(rows):
+    """n, win%, profit factor, net points and net $ for a list of _closed rows."""
+    if not rows:
+        return {"n": 0, "win": 0.0, "pf": 0.0, "pts": 0.0, "usd": 0.0}
+    pts = [r[1] for r in rows]
+    gw = sum(p for p in pts if p > 0)
+    gl = -sum(p for p in pts if p <= 0)
+    return {"n": len(pts), "win": 100 * sum(1 for p in pts if p > 0) / len(pts),
+            "pf": (gw / gl) if gl > 0 else None, "pts": sum(pts), "usd": sum(r[2] for r in rows)}
+
+
+def _pf(v) -> str:
+    """Profit factor, or an em dash when there is no losing trade to divide by."""
+    return "—" if v is None else f"{v:.2f}"
+
+
+def _delta(now_v: float, prev_v: float, unit: str = "", pct_points: bool = False, whole: bool = False) -> str:
+    """Signed change against the previous 30 days; says so plainly when there is nothing to compare."""
+    if prev_v == 0 and not pct_points:
+        return '<span class="d-none">no earlier data</span>'
+    d = now_v - prev_v
+    if abs(d) < 0.05:
+        return '<span class="d-flat">no change</span>'
+    cls = "d-up" if d > 0 else "d-down"
+    if pct_points:
+        txt = f"{d:+.0f} pp"
+    elif whole:
+        txt = f"{d:+,.0f}{unit}"
+    else:
+        txt = f"{d:+,.1f}{unit}" if abs(d) < 100 else f"{d:+,.0f}{unit}"
+    return f'<span class="{cls}">{txt}</span> <span class="d-vs">vs prior 30d</span>'
+
+
+def _tile(label: str, value: str, delta: str, note: str = "") -> str:
+    tail = f'<p class="t-n">{note}</p>' if note else ""
+    return (f'<div class="tile"><p class="t-l">{label}</p><p class="t-v">{value}</p>'
+            f'<p class="t-d">{delta}</p>{tail}</div>')
+
+
+def _equity(rows, width: int = 720, height: int = 148) -> str:
+    """Cumulative points over time. One series, so no legend - the heading names what is plotted."""
+    if len(rows) < 2:
+        return '<p class="muted ch-empty">Not enough closed signals yet to draw a curve.</p>'
+    xs = [r[0] for r in rows]
+    cum, run = [], 0.0
+    for r in rows:
+        run += r[1]
+        cum.append(run)
+    x0, x1 = xs[0], xs[-1]
+    lo, hi = min(0.0, min(cum)), max(0.0, max(cum))
+    pad = (hi - lo) * 0.12 or 1.0
+    lo, hi = lo - pad, hi + pad
+    left, right, top, bot = 8, 54, 12, 18
+
+    def px(t):
+        return left + (t - x0) / max(x1 - x0, 1) * (width - left - right)
+
+    def py(v):
+        return top + (hi - v) / (hi - lo) * (height - top - bot)
+
+    pts = [(px(t), py(v)) for t, v in zip(xs, cum)]
+    line = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+    base = py(0.0)
+    area = f"{line} L{pts[-1][0]:.1f},{base:.1f} L{pts[0][0]:.1f},{base:.1f} Z"
+    ex, ey = pts[-1]
+    end = cum[-1]
+    data = json.dumps([[round(x, 1), round(y, 1), int(t), round(v, 2)]
+                       for (x, y), t, v in zip(pts, xs, cum)]).replace("</", "<\\/")
+    label = f"Cumulative result, {len(rows)} closed signals, ending {end:+.1f} points"
+    return (f'<figure class="eq" data-eq=\'{data}\'>'
+            f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" role="img" '
+            f'preserveAspectRatio="none" aria-label="{label}">'
+            f'<line class="eq-zero" x1="{left}" y1="{base:.1f}" x2="{width - right}" y2="{base:.1f}"/>'
+            f'<path class="eq-area" d="{area}"/><path class="eq-line" d="{line}"/>'
+            f'<g class="eq-cross" hidden><line class="eq-cx" y1="{top}" y2="{height - bot}"/>'
+            f'<circle class="eq-cd" r="4"/></g>'
+            f'<circle class="eq-end" cx="{ex:.1f}" cy="{ey:.1f}" r="4"/>'
+            f'<text class="eq-lab" x="{ex + 9:.1f}" y="{ey:.1f}">{end:+.0f} pts</text></svg>'
+            f'<figcaption><span>{_day(x0 / 1000)} {_clock(x0 / 1000)}</span>'
+            f'<span class="eq-tip" hidden></span><span>now</span></figcaption></figure>')
+
+
+def _by_watch(lives) -> str:
+    """Which strategy actually earned it - the split the headline number hides."""
+    rows = []
+    for lv in lives:
+        if not lv.res:
+            continue
+        ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
+        cl = [t for t in lv.res.trades if not t.is_open and t.points is not None]
+        a = _agg([(0, t.points, t.points * ppt, "") for t in cl])
+        if a["n"]:
+            rows.append((lv.watch.name, lv.watch.paper, a))
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: -r[2]["pts"])
+    best = max(abs(r[2]["pts"]) for r in rows) or 1.0
+    body = ""
+    for name, paper, a in rows:
+        w = abs(a["pts"]) / best * 100
+        cls = "up" if a["pts"] >= 0 else "down"
+        tag = " <small>paper</small>" if paper else ""
+        body += (f'<tr><th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}</td>'
+                 f'<td class="num">{a["win"]:.0f}%</td><td class="num">{_pf(a["pf"])}</td>'
+                 f'<td class="num {cls}">{a["pts"]:+.1f}</td>'
+                 f'<td class="bar-c"><span class="bar {cls}" style="width:{w:.0f}%"></span></td></tr>')
+    return ('<table class="tt wt"><caption class="sr">Result by strategy over the loaded history</caption>'
+            '<thead><tr><th>Strategy</th><th class="num">Signals</th><th class="num">Win</th>'
+            f'<th class="num">PF</th><th class="num">Points</th><th></th></tr></thead><tbody>{body}</tbody></table>')
+
+
+def _perf(lives, now_ct) -> str:
+    rows = _closed(lives)
+    if not rows:
+        return ""
+    now_ms = now_ct.timestamp() * 1000
+    d30, d60 = now_ms - 30 * 86_400_000, now_ms - 60 * 86_400_000
+    a, b = _agg([r for r in rows if r[0] >= d30]), _agg([r for r in rows if d60 <= r[0] < d30])
+    allt = _agg(rows)
+    span = (rows[-1][0] - rows[0][0]) / 86_400_000
+    tiles = "".join([
+        _tile("Signals", f'{a["n"]}', _delta(a["n"], b["n"], whole=True), "last 30 days"),
+        _tile("Win rate", f'{a["win"]:.0f}%', _delta(a["win"], b["win"], pct_points=True)),
+        _tile("Profit factor", _pf(a["pf"]), _delta(a["pf"] or 0, b["pf"] or 0),
+              "gross won ÷ gross lost"),
+        _tile("Net", f'{a["pts"]:+.0f} pts', _delta(a["pts"], b["pts"], " pts", whole=True),
+              f'{_usd(a["usd"])} per micro'),
+    ])
+    return (f'<section class="panel perf" id="perf"><h2>Performance</h2>'
+            f'<div class="tiles">{tiles}</div>'
+            f'<h3 class="eq-h">Cumulative result '
+            f'<span class="muted">· every signal, all strategies, {span:.0f} days</span></h3>'
+            f'{_equity(rows)}'
+            f'<p class="perf-all muted small">All {allt["n"]} signals in the loaded history: '
+            f'{allt["win"]:.0f}% won, profit factor {_pf(allt["pf"])}, {allt["pts"]:+.1f} pts '
+            f'({_usd(allt["usd"])} per micro). Simulated from the bars the bot holds, not your own fills - '
+            f'mark signals <b>Took it</b> or <b>Skipped</b> to track what you actually traded.</p>'
+            f'{_by_watch(lives)}</section>')
 
 
 CSS = """
@@ -617,6 +784,38 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--gold) 55%,transparent)}100%{box-shadow:0 0 0 8px transparent}}}
 @media (prefers-reduced-motion:reduce){.chev,details.more>summary::before,details.earlier>summary::before,.al details>summary::before{transition:none}}
 
+/* performance */
+.perf h3.eq-h{font-size:13px;font-weight:700;margin:18px 0 2px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:10px}
+.tile{background:var(--raise);border:1px solid var(--line);border-radius:14px;padding:13px 15px}
+.t-l{margin:0;font-size:12px;color:var(--soft)}
+.t-v{margin:3px 0 0;font:700 26px/1.1 "Archivo",sans-serif;font-stretch:112%;letter-spacing:-.02em}
+.t-d{margin:5px 0 0;font-size:11.5px;color:var(--faint)}
+.t-n{margin:2px 0 0;font-size:11.5px;color:var(--faint)}
+.d-up{color:var(--up);font-weight:700}.d-down{color:var(--down);font-weight:700}
+.d-flat,.d-none,.d-vs{color:var(--faint)}
+.eq{margin:4px 0 0}
+.eq svg{display:block;overflow:visible;touch-action:pan-y}
+.eq-zero{stroke:var(--line-2);stroke-width:1}
+.eq-area{fill:var(--gold);opacity:.10;stroke:none}
+.eq-line{fill:none;stroke:var(--gold);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.eq-end{fill:var(--gold);stroke:var(--surface);stroke-width:2}
+.eq-lab{fill:var(--ink);font:700 12px "Archivo",sans-serif;dominant-baseline:middle}
+.eq-cross[hidden]{display:none}
+.eq-cx{stroke:var(--line-2);stroke-width:1}
+.eq-cd{fill:var(--gold);stroke:var(--surface);stroke-width:2}
+.eq figcaption{display:flex;justify-content:space-between;align-items:baseline;gap:12px;color:var(--faint);font-size:11.5px;padding:2px 54px 0 8px}
+.eq-tip{color:var(--ink);font-weight:600;font-size:12px;text-align:center;flex:1 1 auto}
+.ch-empty{margin:8px 0 0;font-size:13px}
+.perf-all{margin:12px 0 0;max-width:72ch;line-height:1.55}
+.wt{margin-top:14px}
+.wt .bar-c{width:84px;padding-right:0}
+.wt .bar{display:block;height:6px;border-radius:3px;background:var(--up);min-width:2px}
+.wt .bar.down{background:var(--down)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:620px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .t-v{font-size:22px}.eq figcaption{padding-right:42px}.wt .bar-c{display:none}}
+
 /* responsive */
 @media (max-width:1100px){.w-stats span:nth-child(3){display:none}}
 @media (max-width:980px){.shell{grid-template-columns:minmax(0,1fr);gap:14px}
@@ -683,10 +882,7 @@ def _signal_button(lv) -> str:
     buy = t.direction > 0
     side = ("PAPER " if lv.watch.paper else "") + ("BUY" if buy else "SELL")
     mins = max(0, int((time.time() * 1000 - fired) // 60_000))
-    # after the fill, show the real entry (next bar's open); before it, the signal bar's close
-    filled = t.entry_price is not None
-    levels = (f"Filled {_px(t.entry_price)} (signal {_px(t.signal_close)}) · SL {_px(t.stop)} · TP {_px(t.target)}" if filled
-              else f"Signal {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}")
+    levels = f"Entry {_px(t.signal_close)} · SL {_px(t.stop)} · TP {_px(t.target)}"
     if t.runner:
         levels += f" ({1 - t.runner:.0%} off, rest rides)"
     if t.part_price is not None:
@@ -981,7 +1177,7 @@ def _hero(lives, acts) -> str:
 
 
 def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_open: bool, info=None,
-           port: int = 0, links: list[str] | None = None) -> str:
+           port: int = 0, links: list[str] | None = None, watchdog: bool = False) -> str:
     now_ct = datetime.now(CHICAGO)
     today = now_ct.date()
     past_news = now_ct.hour >= 8  # today's 7:30 release and the 7:00-8:00 block are over
@@ -1022,18 +1218,20 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 {_hero(lives, acts)}
 {_today(lives, now_ct)}
 {watches}
+{_perf(lives, now_ct)}
 <section class="panel journal"><h2>My journal</h2><div id="jr-body"></div></section>
 <section class="panel activity"><h2>Activity</h2>{_alerts(alerts)}</section>
-<p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)}. Updates every 10 seconds.{phone}</p>
+<p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)} · up {_uptime(started)} · {'watchdog on' if watchdog else 'no watchdog'}. Updates every 10 seconds.{phone}</p>
 </main></div>
 <script id="trades-data" type="application/json">{_trades_json(lives)}</script>
 <script>__JS__</script></body></html>""".replace("__JS__", JS.replace("__PORT__", str(port or 8765)))
 
 
-def write(path: Path, lives, nd, alerts, started, mkt_open, info=None, port: int = 0, links: list[str] | None = None) -> None:
+def write(path: Path, lives, nd, alerts, started, mkt_open, info=None, port: int = 0,
+          links: list[str] | None = None, watchdog: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(render(lives, nd, alerts, started, mkt_open, info, port, links), encoding="utf-8")
+    tmp.write_text(render(lives, nd, alerts, started, mkt_open, info, port, links, watchdog), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -1062,11 +1260,30 @@ function jrPaint(){D.querySelectorAll('.jr[data-k]').forEach(function(el){var c=
  var h='<p class="jr-sum">Took <b>'+took.length+'</b>: '+money(sum(took))+' per micro if filled like the bot. Skipped <b>'+sk.length+'</b>: those would have made '+money(sum(sk))+'.</p><table class="tt jt"><thead><tr><th>Signal</th><th>Strategy</th><th>Side</th><th>Result</th><th class="num">$ per micro</th><th>You</th></tr></thead><tbody>';
  mine.slice(0,15).forEach(function(r){var d=new Date(r.t);h+='<tr><td>'+d.toLocaleDateString([],{month:'short',day:'numeric'})+'<small>'+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'</small></td><td>'+r.w+(r.paper?' <small>paper</small>':'')+'</td><td><span class="tag '+r.side.toLowerCase()+'">'+r.side+'</span></td><td>'+r.res+'</td><td class="num '+((r.usd||0)>=0?'up':'down')+'">'+(r.usd==null?'open':money(r.usd))+'</td><td>'+(journal[r.k].choice==='took'?'Took it':'Skipped')+'</td></tr>'});
  body.innerHTML=h+'</tbody></table>'}
+function eqBind(){var f=D.querySelector('.eq[data-eq]');if(!f)return;
+ var pts;try{pts=JSON.parse(f.dataset.eq)}catch(e){return}
+ var svg=f.querySelector('svg'),cross=f.querySelector('.eq-cross'),cx=f.querySelector('.eq-cx'),
+     cd=f.querySelector('.eq-cd'),tip=f.querySelector('.eq-tip');
+ if(!svg||!cross||!pts.length)return;
+ var vb=svg.viewBox.baseVal;
+ function at(ev){var r=svg.getBoundingClientRect();if(!r.width)return;
+  var x=(ev.clientX-r.left)/r.width*vb.width,best=pts[0],bd=1e9;
+  for(var i=0;i<pts.length;i++){var d=Math.abs(pts[i][0]-x);if(d<bd){bd=d;best=pts[i]}}
+  cx.setAttribute('x1',best[0]);cx.setAttribute('x2',best[0]);
+  cd.setAttribute('cx',best[0]);cd.setAttribute('cy',best[1]);cross.hidden=false;
+  var dt=new Date(best[2]);
+  tip.textContent=dt.toLocaleDateString([],{month:'short',day:'numeric'})+' '+
+   dt.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · '+
+   (best[3]>=0?'+':'')+best[3].toFixed(1)+' pts';
+  tip.hidden=false}
+ function off(){cross.hidden=true;tip.hidden=true}
+ svg.addEventListener('pointermove',at);svg.addEventListener('pointerdown',at);
+ svg.addEventListener('pointerleave',off);svg.addEventListener('pointercancel',off)}
 function jrLoad(){if(!HTTP){D.querySelectorAll('.jr').forEach(function(e){e.hidden=true});var b=D.getElementById('jr-body');if(b)b.innerHTML='<p class="muted">Open the dashboard at <b>http://localhost:__PORT__/</b> to use the journal and sound.</p>';return}
  fetch('/api/journal'+Q,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}
 function jrBind(){D.querySelectorAll('.jr[data-k] button').forEach(function(b){b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();var k=b.closest('.jr').dataset.k,c=b.classList.contains('on')?'':b.dataset.c;
  fetch('/api/journal'+Q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,choice:c})}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}})}
-function init(){restore();theme();soundBtn();jrBind();jrPaint();tick();stale();checkSignal()}
+function init(){restore();theme();soundBtn();jrBind();jrPaint();eqBind();tick();stale();checkSignal()}
 window._bt=D.title;init();jrLoad();setInterval(tick,1000);setInterval(stale,20000);
 setInterval(function(){var f=D.querySelector('.act.flash');if(!f){D.title=window._bt;return}D.title=D.title.indexOf('🔔')===0?window._bt:'🔔 '+window._bt},900);
 if(HTTP){setInterval(function(){fetch(location.pathname+Q,{cache:'no-store'}).then(function(r){return r.text()}).then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');

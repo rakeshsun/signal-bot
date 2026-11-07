@@ -254,7 +254,8 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         messages.status(lv.watch, lv.symbol, lv.res, lv.strategy.checklist(lv.book.closed_bars(), Context(lv.symbol, nd)))
         for lv in lives))
     if dashboard_path is not None:
-        dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport, links)
+        dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport,
+                            links, bool(s.watchdog_url))
         log.info("dashboard: %s", dashboard_path)
 
     # was the bot off long enough to have missed signals? (the Mac sleeping is the usual reason)
@@ -270,7 +271,8 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         while dashboard_path is not None:
             await asyncio.sleep(10)
             try:
-                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport, links)
+                dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport,
+                            links, bool(s.watchdog_url))
             except Exception as exc:
                 log.debug("dashboard update failed: %s", exc)
 
