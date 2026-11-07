@@ -601,6 +601,7 @@ h2,h3,h4{margin:0}
 .ri{display:grid;grid-template-columns:12px minmax(0,1fr);column-gap:10px;align-items:center;text-decoration:none;padding:9px 10px;border-radius:10px;border:1px solid transparent}
 .ri:hover{background:var(--surface);border-color:var(--line)}
 .ri-dot{grid-row:1/3;width:8px;height:8px;border-radius:50%;background:var(--faint);justify-self:center}
+.ri.sec{grid-template-columns:minmax(0,1fr)}
 .ri-name{font-weight:700;font-size:14px}.ri-name em{font-style:normal;font-weight:500;color:var(--faint);font-size:11px;margin-left:6px}
 .ri-sub{font-size:12px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ri.on .ri-dot{background:var(--gold);box-shadow:0 0 0 3px var(--gold-2)}.ri.long .ri-dot{background:var(--up)}.ri.short .ri-dot{background:var(--down)}.ri.exit .ri-dot{background:var(--soft)}
@@ -1101,6 +1102,18 @@ def _nl(d, text: str) -> str:
     return f'<a class="nl" href="{_ff(d)}" target="_blank" rel="noopener" title="Open the calendar for this day: forecast vs actual">{text}</a>'
 
 
+def _jump(lives) -> str:
+    """Links to the sections below the strategy cards - without these the page just looks long."""
+    rows = _closed(lives)
+    net = sum(r[1] for r in rows)
+    perf = f'{net:+.0f} pts over {len(rows)} signals' if rows else "no closed signals yet"
+    links = [("#perf", "Performance", perf), ("#journal", "My journal", "what you took and skipped"),
+             ("#activity", "Activity", "alerts the bot sent")]
+    out = "".join(f'<a class="ri sec" href="{h}"><span class="ri-name">{t}</span>'
+                  f'<span class="ri-sub">{E(sub)}</span></a>' for h, t, sub in links)
+    return f'<h2 class="rail-h2">On this page</h2>{out}'
+
+
 def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     items = []
     for lv in lives:
@@ -1138,6 +1151,7 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     other_html = (f'<h2 class="rail-h2">Other big news</h2>{other}<p class="rn muted small">Not blocked: signals still fire. Gold can spike at these times.</p>'
                   if other else "")
     return (f'<nav class="rail" aria-label="Strategies"><h2>Strategies</h2>{"".join(items)}'
+            f'{_jump(lives)}'
             f'<h2 class="rail-h2">News days</h2>{news}<p class="rn muted small">Gold skips 7:00–8:00 CT on these mornings.</p>{other_html}</nav>')
 
 
@@ -1217,10 +1231,10 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 <main class="main">
 {_hero(lives, acts)}
 {_today(lives, now_ct)}
-{watches}
 {_perf(lives, now_ct)}
-<section class="panel journal"><h2>My journal</h2><div id="jr-body"></div></section>
-<section class="panel activity"><h2>Activity</h2>{_alerts(alerts)}</section>
+{watches}
+<section class="panel journal" id="journal"><h2>My journal</h2><div id="jr-body"></div></section>
+<section class="panel activity" id="activity"><h2>Activity</h2>{_alerts(alerts)}</section>
 <p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)} · up {_uptime(started)} · {'watchdog on' if watchdog else 'no watchdog'}. Updates every 10 seconds.{phone}</p>
 </main></div>
 <script id="trades-data" type="application/json">{_trades_json(lives)}</script>
