@@ -107,11 +107,39 @@ def test_dashboard_has_chart_journal_and_today(tmp_path):
     html = dashboard.render([lv], {}, [], time.time(), True, None, 8765, ["http://localhost:8765/", "http://10.0.0.5:8765/?k=abc"])
     assert '<figure class="chart">' in html and "<svg" in html
     assert 'id="jr-body"' in html and 'id="trades-data"' in html and 'class="jr"' in html
-    assert 'class="today"' in html and 'id="sound"' in html
+    assert 'class="h-sub"' in html and 'id="sound"' in html  # today's tally lives on the hero line now
     assert "10.0.0.5:8765/?k=abc" in html and "__PORT__" not in html and "__JS__" not in html
     data = html.split('id="trades-data" type="application/json">')[1].split("</script>")[0]
     rows = json.loads(data)
     assert rows and {"k", "w", "t", "side", "usd"} <= set(rows[0])
+
+
+def test_dashboard_renders_one_performance_view_per_strategy(tmp_path):
+    c, v = random_walk()
+    lv = _live(make_bars(c, vol=v))
+    asyncio.run(_baseline(lv, {}, SentLog(tmp_path / "s.json")))
+    html = dashboard.render([lv], {}, [], time.time(), True, None, 8765, [], watchdog=True)
+    # one combined view plus one per strategy; only the combined one starts visible
+    assert html.count('class="pf-view"') == 2, "one combined view and one for the single strategy"
+    assert html.count('hidden><div class="tiles"') == 1, "the per-strategy view starts hidden"
+    assert 'data-slug="all"' in html
+    # the caveat is written once, not once per view
+    assert html.count("Simulated from the bars the bot holds") == 1
+    # focus needs a bar to get back from, and the rail needs a way to clear it
+    assert 'class="focusbar"' in html and 'href="#all"' in html
+    # the footer reports uptime and whether a watchdog is configured
+    assert "watchdog on" in html
+
+
+def test_dashboard_hidden_elements_are_actually_hidden(tmp_path):
+    """[hidden] is a UA rule at the lowest specificity: any explicit display beats it."""
+    c, v = random_walk()
+    lv = _live(make_bars(c, vol=v))
+    asyncio.run(_baseline(lv, {}, SentLog(tmp_path / "s.json")))
+    html = dashboard.render([lv], {}, [], time.time(), True, None, 8765, [])
+    css = html.split("<style>")[1].split("</style>")[0]
+    for cls in ("focusbar", "nu", "pf-view", "watch"):
+        assert f".{cls}[hidden]" in css, f".{cls} sets display, so it needs an explicit [hidden] rule"
 
 
 def test_dashboard_server_serves_page_and_journal(tmp_path):

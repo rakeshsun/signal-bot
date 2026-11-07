@@ -317,15 +317,15 @@ def _state(lv, now_ct):
 def _cd(lv, now_ct) -> str:
     """Just the live countdown chip, for places that supply their own wording."""
     t = _next_open_ms(lv, now_ct)
-    return f'in <span class="cd" data-t="{t}">–</span>' if t else "open now"
+    return f'in <span class="cdn" data-t="{t}">–</span>' if t else "open now"
 
 
 def _opens_in(lv, now_ct) -> str:
     t = _next_open_ms(lv, now_ct)
-    return f' · in <span class="cd" data-t="{t}">–</span>' if t else ""
+    return f' · in <span class="cdn" data-t="{t}">–</span>' if t else ""
 
 
-def _watch(lv, nd) -> str:
+def _watch(lv, nd, peak: float = 0.0) -> str:
     w = lv.watch
     bars = lv.book.closed_bars()
     slug = "w-" + "".join(c if c.isalnum() else "-" for c in w.name.lower())
@@ -341,9 +341,9 @@ def _watch(lv, nd) -> str:
     return f"""<details class="watch {cls}" id="{slug}" data-key="{E(key)}"{' data-force="1"' if force else ''}{' open' if is_open else ''}>
   <summary class="wh">
     <span class="w-id"><span class="w-name">{E(w.name.title())}</span>{'<span class="paper">Paper</span>' if w.paper else '<span class="live-tag">Live</span>'}</span>
-    <span class="w-state {cls}">{E(label)}{_opens_in(lv, now_ct) if cls == "off" else ""}</span>
+    <span class="w-state {cls}">{E(label)}</span>
     <span class="w-stats" title="Last {st['days']} days in the loaded history">
-      <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{_pf(st['pf'])}</b> PF</span><span><b class="{'up' if st['net'] >= 0 else 'down'}">{st['usd']}</b> per {E(st['unit'])}</span>
+      <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{_pf(st['pf'])}</b> PF</span><span><b class="{'up' if st['net'] >= 0 else 'down'}">{st['usd']}</b> per {E(st['unit'])}</span>{_share(st['net'], peak)}
     </span>
     <span class="chev" aria-hidden="true"></span>
   </summary>
@@ -515,53 +515,41 @@ def _equity(rows, width: int = 720, height: int = 148) -> str:
 THIN = 20  # below this many signals a win rate or PF is noise, not a result
 
 
-def _by_watch(lives) -> str:
-    """Which strategy actually earned it - the split the headline number hides."""
-    rows = []
-    for lv in lives:
-        if not lv.res:
-            continue
-        ppt = next(iter(contract_names(lv.watch, lv.symbol).values()), 0.0)
-        cl = [t for t in lv.res.trades if not t.is_open and t.points is not None]
-        a = _agg([(0, t.points, t.points * ppt, "") for t in cl])
-        if a["n"]:
-            rows.append((lv.watch.name, lv.watch.paper, a))
-    if not rows:
+def _thin_mark(n: int) -> str:
+    if n >= THIN:
         return ""
-    rows.sort(key=lambda r: -r[2]["pts"])
-    best = max(abs(r[2]["pts"]) for r in rows) or 1.0
-    body = ""
-    for name, paper, a in rows:
-        w = abs(a["pts"]) / best * 100
-        cls = "up" if a["pts"] >= 0 else "down"
-        tag = " <small>paper</small>" if paper else ""
-        thin = a["n"] < THIN
-        tcls = " thin" if thin else ""
-        mark = ' <abbr class="tn" title="Too few signals to read anything into - see the note below">thin</abbr>' if thin else ""
-        body += (f'<tr data-slug="{_slug(name)}">'
-                 f'<th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}{mark}</td>'
-                 f'<td class="num{tcls}">{a["win"]:.0f}%</td><td class="num{tcls}">{_pf(a["pf"])}</td>'
-                 f'<td class="num {cls}{tcls}">{a["pts"]:+.1f}</td>'
-                 f'<td class="bar-c"><span class="bar {cls}" style="width:{w:.0f}%"></span></td></tr>')
-    return ('<table class="tt wt"><caption class="sr">Result by strategy over the loaded history</caption>'
-            '<thead><tr><th>Strategy</th><th class="num">Signals</th><th class="num">Win</th>'
-            f'<th class="num">PF</th><th class="num">Points</th><th></th></tr></thead><tbody>{body}</tbody></table>')
+    return ' <abbr class="tn" title="Under 20 signals - too few to read anything into">thin</abbr>'
+
+
+def _share(net: float, peak: float) -> str:
+    """How much of the best strategy's result this one is, as a bar. Blank with nothing to compare to."""
+    if not peak:
+        return ""
+    w = min(100.0, abs(net) / peak * 100)
+    cls = "up" if net >= 0 else "down"
+    return f'<span class="w-bar"><i class="{cls}" style="width:{w:.0f}%"></i></span>'
+
+
 
 
 def _perf(lives, now_ct) -> str:
     if not _closed(lives):
         return ""
-    views = _perf_view(_closed(lives), now_ct, "every signal, all strategies", "all", _by_watch(lives))
+    views = _perf_view(_closed(lives), now_ct, "every signal, all strategies", "all")
     for lv in lives:
         sl = _slug(lv.watch.name)
         r = _closed(lives, sl)
-        views += _perf_view(r, now_ct, E(lv.watch.name.title()), sl, "") if r else (
+        views += _perf_view(r, now_ct, E(lv.watch.name.title()), sl) if r else (
             f'<div class="pf-view" data-slug="{sl}" hidden>'
             f'<p class="muted ch-empty">No closed signals yet for {E(lv.watch.name.title())}.</p></div>')
-    return f'<section class="panel perf" id="perf"><h2>Performance</h2>{views}</section>'
+    return (f'<section class="panel perf" id="perf"><h2>Performance</h2>{views}'
+            f'<p class="perf-all muted small">Simulated from the bars the bot holds, not your own fills - '
+            f'mark signals <b>Took it</b> or <b>Skipped</b> to track what you actually traded. Anything marked '
+            f'<b>thin</b> has under {THIN} signals, which is not enough to judge: at 8 signals a true 60% '
+            f'strategy shows anywhere from 26% to 94% of the time.</p></section>')
 
 
-def _perf_view(rows, now_ct, what: str, slug: str, extra: str) -> str:
+def _perf_view(rows, now_ct, what: str, slug: str) -> str:
     now_ms = now_ct.timestamp() * 1000
     d30, d60 = now_ms - 30 * 86_400_000, now_ms - 60 * 86_400_000
     a, b = _agg([r for r in rows if r[0] >= d30]), _agg([r for r in rows if d60 <= r[0] < d30])
@@ -575,13 +563,6 @@ def _perf_view(rows, now_ct, what: str, slug: str, extra: str) -> str:
         _tile("Net", f'{a["pts"]:+.0f} pts', _delta(a["pts"], b["pts"], " pts", whole=True),
               f'{_usd(a["usd"])} per micro'),
     ])
-    thin = ('' if allt["n"] >= THIN else
-            f'<p class="perf-all muted small">Under {THIN} signals, so none of this is a verdict: at 8 signals a '
-            f'true 60% strategy shows anywhere from 26% to 94% of the time. Judge it on its full backtest.</p>')
-    note = ('' if not extra else
-            f'<p class="perf-all muted small">A row marked <b>thin</b> has under {THIN} signals, which is not '
-            f'enough to judge anything. Judge a strategy on its full backtest and a few hundred signals, '
-            f'not on one quiet month.</p>')
     return (f'<div class="pf-view" data-slug="{slug}"{"" if slug == "all" else " hidden"}>'
             f'<div class="tiles">{tiles}</div>'
             f'<h3 class="eq-h">Cumulative result '
@@ -589,9 +570,7 @@ def _perf_view(rows, now_ct, what: str, slug: str, extra: str) -> str:
             f'{_equity(rows)}'
             f'<p class="perf-all muted small">All {allt["n"]} signals in the loaded history: '
             f'{allt["win"]:.0f}% won, profit factor {_pf(allt["pf"])}, {allt["pts"]:+.1f} pts '
-            f'({_usd(allt["usd"])} per micro). Simulated from the bars the bot holds, not your own fills - '
-            f'mark signals <b>Took it</b> or <b>Skipped</b> to track what you actually traded.</p>'
-            f'{thin}{note}{extra}</div>')
+            f'({_usd(allt["usd"])} per micro).{_thin_mark(allt["n"])}</p></div>')
 
 
 CSS = """
@@ -607,7 +586,7 @@ CSS = """
 :root{--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;--r:4px}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-padding-top:76px}
 body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 "Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
-.num,.tk-px,.t-v,.cd,.w-stats b,.eq-lab,.wt td,.jr-n,.px{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.num,.tk-px,.t-v,.cdn,.w-stats b,.eq-lab,.wt td,.jr-n,.px{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 a{color:inherit}
 h2,h3,h4{margin:0}
 .up{color:var(--up)}.down{color:var(--down)}.muted{color:var(--soft)}.small{font-size:12px}
@@ -692,7 +671,9 @@ details.watch[open]>summary{border-bottom:1px solid var(--line)}
 .w-state{justify-self:start;font-size:11.5px;font-weight:600;border-radius:var(--r);padding:3px 8px;white-space:nowrap;color:var(--soft);background:var(--hover);border:1px solid var(--line)}
 .w-state.on{color:var(--gold-ink);background:var(--gold-2);border-color:transparent}
 .w-state.long{color:var(--up);background:var(--up-bg);border-color:transparent}.w-state.short{color:var(--down);background:var(--down-bg);border-color:transparent}
-.w-stats{justify-self:end;display:flex;gap:16px;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.w-stats{justify-self:end;display:flex;align-items:center;gap:16px;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.w-bar{display:block;width:56px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+.w-bar i{display:block;height:100%;background:var(--up)}.w-bar i.down{background:var(--down)}
 .w-stats b{color:var(--ink-2);font-weight:700;font-size:13px;margin-right:3px}.w-stats b.up{color:var(--up)}.w-stats b.down{color:var(--down)}
 .chev{width:9px;height:9px;border-right:2px solid var(--soft);border-bottom:2px solid var(--soft);transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s ease;justify-self:center}
 details.watch[open]>summary .chev{transform:rotate(225deg) translate(-2px,-2px)}
@@ -811,7 +792,7 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 .chart .lv2.target{stroke:var(--up)}.chart .lv2.zone{stroke:#6c8ff0}.chart .lv2.now{stroke:var(--ink);stroke-dasharray:1 3;opacity:.6}
 .chart .lv2.entry,.chart .lv2.stop,.chart .lv2.target{stroke-dasharray:none;stroke-width:1.4}
 .lb.trigger,.lb.entry,.lb.series{color:var(--gold-ink)}.lb.cancel,.lb.stop{color:var(--down)}.lb.target{color:var(--up)}.lb.zone,.lb.series2{color:#6c8ff0}
-.cd{font-weight:700;font-variant-numeric:tabular-nums}
+.cdn{font-weight:700;font-variant-numeric:tabular-nums}
 /* today, journal, sound */
 .today{margin:0;padding:9px 14px;border-radius:var(--r);background:var(--surface);border:1px solid var(--line);font-size:14px;color:var(--soft)}.today b{color:var(--ink)}.today b.up{color:var(--up)}.today b.down{color:var(--down)}
 .jr{display:inline-flex;gap:4px;flex-wrap:wrap}
@@ -867,6 +848,7 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 .wt .bar.down{background:var(--down)}
 .wt .thin{color:var(--faint)!important;opacity:.75}
 .wt tbody tr{cursor:pointer}
+.focusbar[hidden],.nu[hidden],.pf-view[hidden],.watch[hidden]{display:none!important}
 .focusbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;
   border-radius:var(--r);background:var(--gold-2);color:var(--gold-ink);font-size:12.5px}
 .focusbar b{font-weight:700}
@@ -1080,7 +1062,7 @@ def _chart(lv, bars, live_bar) -> str:
     mins = lv.book.bar_ms // 60000
     cd = ""
     if live_bar is not None:
-        cd = f' · bar closes in <span class="cd" data-t="{live_bar.time + lv.book.bar_ms}">–</span>'
+        cd = f' · bar closes in <span class="cdn" data-t="{live_bar.time + lv.book.bar_ms}">–</span>'
     return (f'<figure class="chart"><div class="ch-plot"><svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" '
             f'aria-label="Last {len(view)} {mins}-minute candles with strategy levels">{"".join(out)}</svg>'
             f'<div class="ch-lbl">{"".join(tags)}</div></div>'
@@ -1258,7 +1240,7 @@ def _hero(lives, acts) -> str:
         live = lv in watching
         when = _window(lv).split(" and ")[1 if live else 0].replace(" CT", "")
         cd = _cd(lv, now_ct)
-        cells += (f'<div class="nu{" on" if live else ""}"><span class="nu-n">{E(lv.watch.name.title())}</span>'
+        cells += (f'<div class="nu{" on" if live else ""}" data-slug="{_slug(lv.watch.name)}"><span class="nu-n">{E(lv.watch.name.title())}</span>'
                   f'<span class="nu-w">{"closes" if live else "opens"} {when}</span>'
                   f'<span class="nu-c">{cd}</span></div>')
     head = f"{len(watching)} watching now" if watching else "Nothing open"
@@ -1276,7 +1258,8 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
     past_news = now_ct.hour >= 8  # today's 7:30 release and the 7:00-8:00 block are over
     upcoming = sorted((d, n) for d, n in nd.items() if d > today or (d == today and not past_news))[:5]
     news_today = None if past_news else nd.get(today)
-    watches = "".join(_watch(lv, nd) for lv in lives)
+    peak = max((abs(_stats(lv)["net"]) for lv in lives if lv.res), default=0.0)
+    watches = "".join(_watch(lv, nd, peak) for lv in lives)
     acts = [_action(lv) for lv in lives if lv.res]
     title = "Signal Desk"
     for lv, a in zip([lv for lv in lives if lv.res], acts):
@@ -1333,7 +1316,7 @@ function g(k){try{return localStorage.getItem(k)}catch(x){return null}}
 function st(k,v){try{localStorage.setItem(k,v)}catch(x){}}
 var HTTP=location.protocol.indexOf('http')===0, Q=location.search||'', journal={}, ctx=null;
 function fmt(ms){if(ms<=0)return 'now';var s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return h?h+'h '+(m<10?'0':'')+m+'m':m+':'+(x<10?'0':'')+x}
-function tick(){var n=Date.now();D.querySelectorAll('.cd[data-t]').forEach(function(e){e.textContent=fmt(+e.dataset.t-n)})}
+function tick(){var n=Date.now();D.querySelectorAll('.cdn[data-t]').forEach(function(e){e.textContent=fmt(+e.dataset.t-n)})}
 function stale(){var e=D.getElementById('upd');if(!e)return;var m=Math.floor((Date.now()/1000-(+e.dataset.t))/60);if(m>=3){e.textContent='Not updated for '+m+' min: the bot may have stopped';e.className='stale'}}
 function restore(){D.querySelectorAll('details[data-key]').forEach(function(d){var k='sd:'+d.dataset.key,v=g(k);if(d.dataset.force==='1'){d.open=true}else if(v!==null){d.open=v==='1'}d.addEventListener('toggle',function(){st(k,d.open?'1':'0')})});
  D.querySelectorAll('.ri').forEach(function(a){a.addEventListener('click',function(){var d=D.querySelector(a.getAttribute('href'));if(d&&d.tagName==='DETAILS')d.open=true})})}
@@ -1365,6 +1348,7 @@ function applyFocus(){var f=focusOf(),bar=D.querySelector('.focusbar'),name='';
  D.querySelectorAll('.ri[data-slug]').forEach(function(a){
    a.classList.toggle('sel',a.dataset.slug===(f||'all'))});
  D.querySelectorAll('.pf-view').forEach(function(v){v.hidden=v.dataset.slug!==(f||'all')});
+ D.querySelectorAll('.nu[data-slug]').forEach(function(c){c.hidden=!!f&&c.dataset.slug!==f});
  if(bar){bar.hidden=!f;var b=bar.querySelector('.fb-n');if(b)b.textContent=name}
  jrPaint()}
 function focusBind(){
