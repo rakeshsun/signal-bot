@@ -206,3 +206,58 @@ def test_bos_trend_filter_only_trades_with_the_trend():
         assert all((bs[i].close - ema[i]) * x.direction > 0 for i, x in sigs)
         removed += len(unfiltered) - len(sigs)
     assert removed > 0
+
+
+def _pb_bars(closes: list[float], wick: float = 3.0):
+    """Bars that trend with the closes and have a `wick` deep enough to reach a lagging EMA."""
+    from signalbot.bars import Bar
+
+    return [
+        Bar(time=1_762_000_000_000 + i * 900_000, open=c, high=c + wick, low=c - wick, close=c, volume=1)
+        for i, c in enumerate(closes)
+    ]
+
+
+def test_ema_pullback_needs_a_trend_and_a_close_back_above_the_fast_ema():
+    from signalbot.strategies import get
+    from signalbot.strategies.base import Context
+
+    cls = get("ema_pullback")
+    p = {"fast": 5, "slow": 10, "atr_len": 5, "session_start": 0, "session_end": 2400}
+    strat = cls(cls.make_params(p))
+
+    up = [100.0 + i for i in range(40)]
+    assert any(s and s.direction == 1 for s in strat.signals(_pb_bars(up), Context()))
+
+    # the mirror image must give shorts and never a long
+    dn = [200.0 - i for i in range(40)]
+    sigs = strat.signals(_pb_bars(dn), Context())
+    assert any(s and s.direction == -1 for s in sigs)
+    assert not any(s and s.direction == 1 for s in sigs)
+
+    # flat market: price is never clear of the slow EMA, so there is no trend to pull back into
+    assert not any(strat.signals(_pb_bars([100.0] * 40), Context()))
+
+
+def test_ema_pullback_respects_do_long_and_do_short():
+    from signalbot.strategies import get
+    from signalbot.strategies.base import Context
+
+    cls = get("ema_pullback")
+    base = {"fast": 5, "slow": 10, "atr_len": 5, "session_start": 0, "session_end": 2400}
+    up = _pb_bars([100.0 + i for i in range(40)])
+    assert not any(cls(cls.make_params({**base, "do_long": False})).signals(up, Context()))
+    assert any(cls(cls.make_params({**base, "do_short": False})).signals(up, Context()))
+
+
+def test_ema_pullback_only_fires_inside_its_session():
+    from signalbot.bars import hhmm
+    from signalbot.strategies import get
+    from signalbot.strategies.base import Context
+
+    cls = get("ema_pullback")
+    bars = _pb_bars([100.0 + i for i in range(400)])
+    sigs = cls(cls.make_params({"fast": 5, "slow": 10, "atr_len": 5})).signals(bars, Context())
+    fired = {hhmm(bars[i].time) for i, s in enumerate(sigs) if s}
+    assert fired, "expected at least one signal"
+    assert all(820 <= t < 1000 for t in fired), f"fired outside 8:20-10:00 CT: {sorted(fired)}"
