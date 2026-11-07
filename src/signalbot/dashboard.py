@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -283,6 +284,41 @@ def _checks(lv, nd) -> str:
     return "".join(out)
 
 
+MONTHS = {"F": "Jan", "G": "Feb", "H": "Mar", "J": "Apr", "K": "May", "M": "Jun",
+          "N": "Jul", "Q": "Aug", "U": "Sep", "V": "Oct", "X": "Nov", "Z": "Dec"}
+
+
+def _contract(lv) -> dict:
+    """What is actually being traded: month name, expiry, and days until it rolls."""
+    sym = lv.symbol or ""
+    exp = getattr(lv.inst, "expires", None)
+    out = {"sym": sym, "month": "", "expires": "", "days": None, "soon": False}
+    m = re.fullmatch(r"/([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d)", sym.upper())
+    if m and exp:
+        out["month"] = f"{MONTHS[m.group(2)]} {exp.year}"
+    elif m:
+        out["month"] = MONTHS[m.group(2)]
+    if exp:
+        out["expires"] = exp.strftime("%-d %b")
+        d = (exp - datetime.now(CHICAGO).date()).days
+        out["days"] = d
+        out["soon"] = d <= 7
+    return out
+
+
+def _contract_line(lv) -> str:
+    c = _contract(lv)
+    if not c["month"]:
+        return ""
+    bits = [c["month"]]
+    if c["days"] is not None:
+        bits.append(f'rolls in {c["days"]}d' if c["days"] >= 0 else "expired")
+    elif c["expires"]:
+        bits.append(f'expires {c["expires"]}')
+    cls = " soon" if c["soon"] else ""
+    return f'<span class="contract{cls}" title="Expires {c["expires"] or "unknown"}">{" · ".join(bits)}</span>'
+
+
 def _stats(lv):
     closed = [t for t in lv.res.trades if not t.is_open]
     wins = sum(1 for t in closed if t.won)
@@ -291,8 +327,11 @@ def _stats(lv):
     names = contract_names(lv.watch, lv.symbol)
     first = next(iter(names.items()), None)
     days = max(1, len(lv.res.bars) * lv.book.bar_ms // 86_400_000)
+    qty = max(1, int(getattr(lv.watch, "size", 1) or 1))
+    per = (gw - gl) * first[1] if first else 0.0
     return {"n": len(closed), "wins": wins, "pf": (gw / gl) if gl else None, "net": gw - gl,
-            "usd": _usd((gw - gl) * first[1]) if first else "", "unit": first[0] if first else "", "days": days}
+            "usd": _usd(per) if first else "", "unit": first[0] if first else "", "days": days,
+            "qty": qty, "total": _usd(per * qty) if first else ""}
 
 
 def _state(lv, now_ct):
@@ -343,7 +382,7 @@ def _watch(lv, nd, peak: float = 0.0) -> str:
     <span class="w-id"><span class="w-name">{E(w.name.title())}</span>{'<span class="paper">Paper</span>' if w.paper else '<span class="live-tag">Live</span>'}</span>
     <span class="w-state {cls}">{E(label)}</span>
     <span class="w-stats" title="Last {st['days']} days in the loaded history">
-      <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{_pf(st['pf'])}</b> PF</span><span><b class="{'up' if st['net'] >= 0 else 'down'}">{st['usd']}</b> per {E(st['unit'])}</span>{_share(st['net'], peak)}
+      <span><b>{st['wins']}/{st['n']}</b> won</span><span><b class="{pf_cls}">{_pf(st['pf'])}</b> PF</span><span class="w-pnl"><b class="{'up' if st['net'] >= 0 else 'down'}">{st['total']}</b> at {st['qty']}x {E(st['unit'])}{'' if st['qty'] == 1 else f" ({st['usd']} each)"}</span>{_share(st['net'], peak)}
     </span>
     <span class="chev" aria-hidden="true"></span>
   </summary>
@@ -425,7 +464,9 @@ def _closed(lives, only=None):
         for t in lv.res.trades:
             if t.is_open or t.points is None:
                 continue
-            out.append(((t.exit_time or t.signal_time) + lv.book.bar_ms, t.points, t.points * ppt, lv.watch.name))
+            qty = max(1, int(getattr(lv.watch, "size", 1) or 1))
+            out.append(((t.exit_time or t.signal_time) + lv.book.bar_ms, t.points,
+                        t.points * ppt, lv.watch.name, t.points * ppt * qty))
     out.sort(key=lambda r: r[0])
     return out
 
@@ -433,12 +474,13 @@ def _closed(lives, only=None):
 def _agg(rows):
     """n, win%, profit factor, net points and net $ for a list of _closed rows."""
     if not rows:
-        return {"n": 0, "win": 0.0, "pf": 0.0, "pts": 0.0, "usd": 0.0}
+        return {"n": 0, "win": 0.0, "pf": 0.0, "pts": 0.0, "usd": 0.0, "total": 0.0}
     pts = [r[1] for r in rows]
     gw = sum(p for p in pts if p > 0)
     gl = -sum(p for p in pts if p <= 0)
     return {"n": len(pts), "win": 100 * sum(1 for p in pts if p > 0) / len(pts),
-            "pf": (gw / gl) if gl > 0 else None, "pts": sum(pts), "usd": sum(r[2] for r in rows)}
+            "pf": (gw / gl) if gl > 0 else None, "pts": sum(pts), "usd": sum(r[2] for r in rows),
+            "total": sum(r[4] for r in rows)}
 
 
 def _pf(v) -> str:
@@ -560,8 +602,8 @@ def _perf_view(rows, now_ct, what: str, slug: str) -> str:
         _tile("Win rate", f'{a["win"]:.0f}%', _delta(a["win"], b["win"], pct_points=True)),
         _tile("Profit factor", _pf(a["pf"]), _delta(a["pf"] or 0, b["pf"] or 0),
               "gross won ÷ gross lost"),
-        _tile("Net", f'{a["pts"]:+.0f} pts', _delta(a["pts"], b["pts"], " pts", whole=True),
-              f'{_usd(a["usd"])} per micro'),
+        _tile("Net", _usd(a["total"]), _delta(a["pts"], b["pts"], " pts", whole=True),
+              f'{a["pts"]:+.0f} pts · {_usd(a["usd"])} per micro'),
     ])
     return (f'<div class="pf-view" data-slug="{slug}"{"" if slug == "all" else " hidden"}>'
             f'<div class="tiles">{tiles}</div>'
@@ -570,7 +612,8 @@ def _perf_view(rows, now_ct, what: str, slug: str) -> str:
             f'{_equity(rows)}'
             f'<p class="perf-all muted small">All {allt["n"]} signals in the loaded history: '
             f'{allt["win"]:.0f}% won, profit factor {_pf(allt["pf"])}, {allt["pts"]:+.1f} pts '
-            f'({_usd(allt["usd"])} per micro).{_thin_mark(allt["n"])}</p></div>')
+            f'(<b>{_usd(allt["total"])}</b> at the sizes you trade, {_usd(allt["usd"])} per micro)'
+            f'.{_thin_mark(allt["n"])}</p></div>')
 
 
 CSS = """
@@ -599,6 +642,9 @@ h2,h3,h4{margin:0}
 .ingot{width:12px;height:20px;border-radius:2px;background:linear-gradient(155deg,#f6e2a2,var(--gold) 50%,#6e5016);box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
 .tick{display:flex;align-items:baseline;gap:10px;padding-left:24px;border-left:1px solid var(--line)}
 .tk-sym{color:var(--soft);font-weight:600;font-size:12px;letter-spacing:.04em}
+.contract{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line-2);border-radius:var(--r);padding:2px 6px;white-space:nowrap}
+.contract.soon{color:var(--exit);border-color:var(--exit)}
+.w-pnl{text-transform:none;letter-spacing:0}
 .tk-px{font:700 22px/1 var(--mono);letter-spacing:-.03em;color:var(--ink-2)}
 .tk-chg{font-weight:700;font-size:14px}.tk-note{color:var(--faint);font-size:12px}
 .status{margin:0 0 0 auto;display:flex;align-items:center;gap:14px;color:var(--soft);font-size:13px;white-space:nowrap}
@@ -1152,7 +1198,7 @@ def _jump(lives) -> str:
     """Links to the sections below the strategy cards - without these the page just looks long."""
     rows = _closed(lives)
     net = sum(r[1] for r in rows)
-    perf = f'{net:+.0f} pts over {len(rows)} signals' if rows else "no closed signals yet"
+    perf = f'{_usd(sum(r[4] for r in rows))} over {len(rows)} signals' if rows else "no closed signals yet"
     links = [("#perf", "Performance", perf), ("#journal", "My journal", "what you took and skipped"),
              ("#activity", "Activity", "alerts the bot sent")]
     out = "".join(f'<a class="ri sec" href="{h}"><span class="ri-name">{t}</span>'
@@ -1218,7 +1264,8 @@ def _ticker(lives) -> str:
         start -= timedelta(days=1)
     first = next((b for b in bars if b.time >= start.timestamp() * 1000), None)
     chg = (px - first.open) if first else 0.0
-    return (f'<div class="tick"><span class="tk-sym">{E(lv.symbol)}</span><span class="tk-px">{_px(px)}</span>'
+    return (f'<div class="tick"><span class="tk-sym">{E(lv.symbol)}</span>{_contract_line(lv)}'
+            f'<span class="tk-px">{_px(px)}</span>'
             f'<span class="tk-chg {"up" if chg >= 0 else "down"}">{"▲" if chg >= 0 else "▼"} {abs(chg):,.1f}</span>'
             f'<span class="tk-note">{"live" if live_px is not None else "last close"}, since 5 PM open</span></div>')
 
