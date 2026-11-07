@@ -534,7 +534,8 @@ def _by_watch(lives) -> str:
         thin = a["n"] < THIN
         tcls = " thin" if thin else ""
         mark = ' <abbr class="tn" title="Too few signals to read anything into - see the note below">thin</abbr>' if thin else ""
-        body += (f'<tr><th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}{mark}</td>'
+        body += (f'<tr data-slug="w-{"".join(c if c.isalnum() else "-" for c in name.lower())}">'
+                 f'<th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}{mark}</td>'
                  f'<td class="num{tcls}">{a["win"]:.0f}%</td><td class="num{tcls}">{_pf(a["pf"])}</td>'
                  f'<td class="num {cls}{tcls}">{a["pts"]:+.1f}</td>'
                  f'<td class="bar-c"><span class="bar {cls}" style="width:{w:.0f}%"></span></td></tr>')
@@ -847,6 +848,14 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 .wt .bar{display:block;height:6px;border-radius:3px;background:var(--up);min-width:2px}
 .wt .bar.down{background:var(--down)}
 .wt .thin{color:var(--faint)!important;opacity:.75}
+.wt tbody tr{cursor:pointer}
+.focusbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;
+  border-radius:var(--r);background:var(--gold-2);color:var(--gold-ink);font-size:12.5px}
+.focusbar b{font-weight:700}
+.fb-x{color:inherit;font-weight:600;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+.ri.all .ri-dot{background:var(--soft)}
+.ri.sel{background:var(--hover);border-color:var(--line-2)}
+.ri.sel .ri-name{color:var(--gold-ink)}
 .tn{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border:1px solid var(--line-2);
   border-radius:3px;padding:0 3px;margin-left:5px;text-decoration:none;font-family:"Archivo",sans-serif;cursor:help}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
@@ -1156,7 +1165,7 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     for lv in lives:
         slug = "w-" + "".join(c if c.isalnum() else "-" for c in lv.watch.name.lower())
         label, cls, _, _ = _state(lv, now_ct) if lv.res else ("Waiting for data", "off", False, False)
-        items.append(f'<a class="ri {cls}" href="#{slug}"><span class="ri-dot"></span><span class="ri-name">{E(lv.watch.name.title())}'
+        items.append(f'<a class="ri {cls}" href="#{slug}" data-slug="{slug}"><span class="ri-dot"></span><span class="ri-name">{E(lv.watch.name.title())}'
                      f'{"" if not lv.watch.paper else "<em>paper</em>"}</span><span class="ri-sub">{E(label)}</span></a>')
     if news_today:
         news = f'<p class="rn hot"><b>{_nl(now_ct.date(), E(news_today) + " today, 7:30 CT")}.</b> Gold takes no new entries 7:00–8:00.</p>'
@@ -1187,7 +1196,10 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
         other += f'<p class="rn{" warn" if d == now_ct.date() else ""}"><b>{when}</b><br>{lines}</p>'
     other_html = (f'<h2 class="rail-h2">Other big news</h2>{other}<p class="rn muted small">Not blocked: signals still fire. Gold can spike at these times.</p>'
                   if other else "")
-    return (f'<nav class="rail" aria-label="Strategies"><h2>Strategies</h2>{"".join(items)}'
+    allr = ('<a class="ri all" href="#all" data-slug="all"><span class="ri-dot"></span>'
+            '<span class="ri-name">All strategies</span>'
+            f'<span class="ri-sub">{len(lives)} running</span></a>')
+    return (f'<nav class="rail" aria-label="Strategies"><h2>Strategies</h2>{allr}{"".join(items)}'
             f'{_jump(lives)}'
             f'<h2 class="rail-h2">News days</h2>{news}<p class="rn muted small">Gold skips 7:00–8:00 CT on these mornings.</p>{other_html}</nav>')
 
@@ -1280,7 +1292,7 @@ def render(lives, nd: dict[date, str], alerts: list[dict], started: float, mkt_o
 <main class="main">
 {_hero(lives, acts)}
 {_perf(lives, now_ct)}
-<section class="watches">{watches}</section>
+<div class="focusbar" hidden><span>Showing <b class="fb-n"></b> only</span><a class="fb-x" href="#all">Show all strategies</a></div>\n<section class="watches">{watches}</section>
 <section class="panel journal" id="journal"><h2>My journal</h2><div id="jr-body"></div></section>
 <section class="panel activity" id="activity"><h2>Activity</h2>{_alerts(alerts)}</section>
 <p class="foot">Signals only, not trading advice. You place trades yourself on Robinhood. Running since {_clock(started)}{'' if _day(started) == 'Today' else ', ' + _day(started)} · up {_uptime(started)} · {'watchdog on' if watchdog else 'no watchdog'}. Updates every 10 seconds.{phone}</p>
@@ -1322,6 +1334,22 @@ function jrPaint(){D.querySelectorAll('.jr[data-k]').forEach(function(el){var c=
  var h='<p class="jr-sum">Took <b>'+took.length+'</b>: '+money(sum(took))+' per micro if filled like the bot. Skipped <b>'+sk.length+'</b>: those would have made '+money(sum(sk))+'.</p><table class="tt jt"><thead><tr><th>Signal</th><th>Strategy</th><th>Side</th><th>Result</th><th class="num">$ per micro</th><th>You</th></tr></thead><tbody>';
  mine.slice(0,15).forEach(function(r){var d=new Date(r.t);h+='<tr><td>'+d.toLocaleDateString([],{month:'short',day:'numeric'})+'<small>'+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'</small></td><td>'+r.w+(r.paper?' <small>paper</small>':'')+'</td><td><span class="tag '+r.side.toLowerCase()+'">'+r.side+'</span></td><td>'+r.res+'</td><td class="num '+((r.usd||0)>=0?'up':'down')+'">'+(r.usd==null?'open':money(r.usd))+'</td><td>'+(journal[r.k].choice==='took'?'Took it':'Skipped')+'</td></tr>'});
  body.innerHTML=h+'</tbody></table>'}
+/* clicking a strategy shows only that strategy; the hash carries the state so it
+   survives the repaint, back/forward and a bookmarked phone link */
+function focusOf(){var h=(location.hash||'').replace('#','');return h&&h!=='all'&&/^w-/.test(h)?h:''}
+function applyFocus(){var f=focusOf(),bar=D.querySelector('.focusbar'),name='';
+ D.querySelectorAll('.watches>.watch').forEach(function(w){
+   var on=!f||w.id===f;w.hidden=!on;
+   if(f&&w.id===f){w.open=true;var n=w.querySelector('.w-name');name=n?n.textContent:f}});
+ D.querySelectorAll('.wt tbody tr[data-slug]').forEach(function(tr){
+   tr.hidden=!!f&&tr.dataset.slug!==f});
+ D.querySelectorAll('.ri[data-slug]').forEach(function(a){
+   a.classList.toggle('sel',a.dataset.slug===(f||'all'))});
+ if(bar){bar.hidden=!f;var b=bar.querySelector('.fb-n');if(b)b.textContent=name}}
+function focusBind(){
+ D.querySelectorAll('.wt tbody tr[data-slug]').forEach(function(tr){
+   tr.onclick=function(){location.hash=tr.dataset.slug}});
+ if(!window.__fh){window.__fh=1;window.addEventListener('hashchange',applyFocus)}}
 function eqBind(){var f=D.querySelector('.eq[data-eq]');if(!f)return;
  var pts;try{pts=JSON.parse(f.dataset.eq)}catch(e){return}
  var svg=f.querySelector('svg'),cross=f.querySelector('.eq-cross'),cx=f.querySelector('.eq-cx'),
@@ -1345,7 +1373,7 @@ function jrLoad(){if(!HTTP){D.querySelectorAll('.jr').forEach(function(e){e.hidd
  fetch('/api/journal'+Q,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}
 function jrBind(){D.querySelectorAll('.jr[data-k] button').forEach(function(b){b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();var k=b.closest('.jr').dataset.k,c=b.classList.contains('on')?'':b.dataset.c;
  fetch('/api/journal'+Q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,choice:c})}).then(function(r){return r.json()}).then(function(j){journal=j;jrPaint()}).catch(function(){})}})}
-function init(){restore();theme();soundBtn();jrBind();jrPaint();eqBind();tick();stale();checkSignal()}
+function init(){restore();theme();soundBtn();jrBind();jrPaint();eqBind();focusBind();applyFocus();tick();stale();checkSignal()}
 window._bt=D.title;init();jrLoad();setInterval(tick,1000);setInterval(stale,20000);
 setInterval(function(){var f=D.querySelector('.act.flash');if(!f){D.title=window._bt;return}D.title=D.title.indexOf('🔔')===0?window._bt:'🔔 '+window._bt},900);
 if(HTTP){setInterval(function(){fetch(location.pathname+Q,{cache:'no-store'}).then(function(r){return r.text()}).then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');
