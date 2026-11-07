@@ -508,6 +508,9 @@ def _equity(rows, width: int = 720, height: int = 148) -> str:
             f'<span class="eq-tip" hidden></span><span>now</span></figcaption></figure>')
 
 
+THIN = 20  # below this many signals a win rate or PF is noise, not a result
+
+
 def _by_watch(lives) -> str:
     """Which strategy actually earned it - the split the headline number hides."""
     rows = []
@@ -528,9 +531,12 @@ def _by_watch(lives) -> str:
         w = abs(a["pts"]) / best * 100
         cls = "up" if a["pts"] >= 0 else "down"
         tag = " <small>paper</small>" if paper else ""
-        body += (f'<tr><th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}</td>'
-                 f'<td class="num">{a["win"]:.0f}%</td><td class="num">{_pf(a["pf"])}</td>'
-                 f'<td class="num {cls}">{a["pts"]:+.1f}</td>'
+        thin = a["n"] < THIN
+        tcls = " thin" if thin else ""
+        mark = ' <abbr class="tn" title="Too few signals to read anything into - see the note below">thin</abbr>' if thin else ""
+        body += (f'<tr><th scope="row">{E(name)}{tag}</th><td class="num">{a["n"]}{mark}</td>'
+                 f'<td class="num{tcls}">{a["win"]:.0f}%</td><td class="num{tcls}">{_pf(a["pf"])}</td>'
+                 f'<td class="num {cls}{tcls}">{a["pts"]:+.1f}</td>'
                  f'<td class="bar-c"><span class="bar {cls}" style="width:{w:.0f}%"></span></td></tr>')
     return ('<table class="tt wt"><caption class="sr">Result by strategy over the loaded history</caption>'
             '<thead><tr><th>Strategy</th><th class="num">Signals</th><th class="num">Win</th>'
@@ -563,6 +569,9 @@ def _perf(lives, now_ct) -> str:
             f'{allt["win"]:.0f}% won, profit factor {_pf(allt["pf"])}, {allt["pts"]:+.1f} pts '
             f'({_usd(allt["usd"])} per micro). Simulated from the bars the bot holds, not your own fills - '
             f'mark signals <b>Took it</b> or <b>Skipped</b> to track what you actually traded.</p>'
+            f'<p class="perf-all muted small">A row marked <b>thin</b> has under {THIN} signals, which is not '
+            f'enough to judge anything: at 8 signals a true 60% strategy shows anywhere from 26% to 94% of the time. '
+            f'Judge a strategy on its full backtest and a few hundred signals, not on one quiet month.</p>'
             f'{_by_watch(lives)}</section>')
 
 
@@ -837,6 +846,9 @@ details.trades{border-top:1px solid var(--line);margin-top:18px;padding-top:10px
 .wt .bar-c{width:84px;padding-right:0}
 .wt .bar{display:block;height:6px;border-radius:3px;background:var(--up);min-width:2px}
 .wt .bar.down{background:var(--down)}
+.wt .thin{color:var(--faint)!important;opacity:.75}
+.tn{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border:1px solid var(--line-2);
+  border-radius:3px;padding:0 3px;margin-left:5px;text-decoration:none;font-family:"Archivo",sans-serif;cursor:help}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:620px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .t-v{font-size:22px}.eq figcaption{padding-right:42px}.wt .bar-c{display:none}}
