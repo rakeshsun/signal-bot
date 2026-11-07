@@ -261,3 +261,53 @@ def test_ema_pullback_only_fires_inside_its_session():
     fired = {hhmm(bars[i].time) for i, s in enumerate(sigs) if s}
     assert fired, "expected at least one signal"
     assert all(820 <= t < 1000 for t in fired), f"fired outside 8:20-10:00 CT: {sorted(fired)}"
+
+
+def test_uptime_gap_only_reports_missed_market_time(tmp_path):
+    from datetime import datetime
+
+    from signalbot import uptime
+    from signalbot.bars import CHICAGO
+    from signalbot.runner import market_open
+
+    def gap(a, b):
+        uptime.touch(tmp_path, a.timestamp())
+        return uptime.gap_since(tmp_path, market_open, 20, now=b.timestamp())
+
+    # never run before: nothing to report
+    assert uptime.gap_since(tmp_path, market_open) is None
+
+    # Thursday evening to Friday morning: the market was open nearly all of it
+    g = gap(datetime(2026, 11, 5, 18, 5, tzinfo=CHICAGO), datetime(2026, 11, 6, 7, 12, tzinfo=CHICAGO))
+    assert g and "13h" in g[0]
+    assert "6:05 PM" in g[1] and "7:12 AM" in g[1]
+
+    # the whole weekend, with the market shut: nothing was missed
+    assert gap(datetime(2026, 11, 7, 10, 0, tzinfo=CHICAGO), datetime(2026, 11, 8, 10, 0, tzinfo=CHICAGO)) is None
+
+    # a quick restart is not an outage
+    assert gap(datetime(2026, 11, 5, 2, 0, tzinfo=CHICAGO), datetime(2026, 11, 5, 2, 3, tzinfo=CHICAGO)) is None
+
+    # 90 minutes of London session is
+    g = gap(datetime(2026, 11, 5, 2, 0, tzinfo=CHICAGO), datetime(2026, 11, 5, 3, 30, tzinfo=CHICAGO))
+    assert g and "1h 30m" in g[0]
+
+
+def test_uptime_open_minutes_counts_only_trading_hours():
+    from datetime import datetime
+
+    from signalbot import uptime
+    from signalbot.bars import CHICAGO
+    from signalbot.runner import market_open
+
+    # Friday 3 PM to Sunday 6 PM CT: trading stops at 4 PM Friday, resumes 5 PM Sunday
+    mins = uptime.open_minutes(datetime(2026, 11, 6, 15, 0, tzinfo=CHICAGO),
+                               datetime(2026, 11, 8, 18, 0, tzinfo=CHICAGO), market_open)
+    assert 100 <= mins <= 130, mins  # ~1h Friday + ~1h Sunday
+
+
+def test_uptime_ping_never_raises():
+    from signalbot import uptime
+
+    assert uptime.ping("") is False
+    assert uptime.ping("http://127.0.0.1:9/nope", timeout=0.3) is False

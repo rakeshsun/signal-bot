@@ -15,6 +15,15 @@ dashboard_port = 8765
 # is printed in logs/signalbot.log and on the dashboard footer.
 dashboard_lan = false
 
+# "The bot was offline" alert. On start-up, if the bot missed this many minutes of market time,
+# it tells you so and names the window - the usual cause is the Mac going to sleep. 0 turns it off.
+offline_alert_min = 20
+
+# Optional outside watchdog, pinged every 5 minutes. A dead bot cannot alert you itself, so this
+# is the only thing that notices while the machine is asleep. Make a free check at
+# healthchecks.io (period 10 min, grace 20 min) and paste its ping URL here.
+watchdog_url = ""
+
 [notify]
 # Free phone push: install "ntfy" (developer Philipp Heckel) and subscribe to this topic.
 # Pick a hard-to-guess name - anyone who knows it can read your alerts.

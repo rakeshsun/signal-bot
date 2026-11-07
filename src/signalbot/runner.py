@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import dashboard, messages, news, server, strategies
+from . import dashboard, messages, news, server, strategies, uptime
 from .bars import CHICAGO, hhmm
 from .config import Settings, Watch
 from .engine import Result, simulate
@@ -257,6 +257,15 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
         dashboard.write(dashboard_path, lives, nd, list(alerts.recent), started, market_open(), info, dport, links)
         log.info("dashboard: %s", dashboard_path)
 
+    # was the bot off long enough to have missed signals? (the Mac sleeping is the usual reason)
+    if s.offline_alert_min > 0:
+        gap = uptime.gap_since(s.state_dir, market_open, s.offline_alert_min)
+        if gap:
+            log.warning("%s", gap[0])
+            await alerts.send(f"offline|{int(time.time()) // 3600}", gap[0], gap[1], urgent=True, kind="info")
+    uptime.touch(s.state_dir)
+    last_ping = 0.0
+
     async def dash_loop() -> None:  # live price + live checks on the page every 10 s
         while dashboard_path is not None:
             await asyncio.sleep(10)
@@ -272,6 +281,13 @@ async def _run(s: Settings, notifier: Notifier, sent: SentLog, dashboard_path: P
             await asyncio.sleep(((SETTLE_SECS - now % 60) % 60) or 60)  # every minute at :20 s
             now_ct = datetime.now(CHICAGO)
             today, now_hm = now_ct.date(), hhmm(int(time.time() * 1000))
+
+            # proof of life: a local stamp for the next start-up, and an outside watchdog that
+            # can shout while this machine is asleep
+            uptime.touch(s.state_dir)
+            if s.watchdog_url and time.time() - last_ping >= 300:
+                last_ping = time.time()
+                await asyncio.to_thread(uptime.ping, s.watchdog_url)
 
             for i, lv in enumerate(lives):
                 if lv.task.done():

@@ -42,6 +42,9 @@ class Settings:
     dashboard_lan: bool = False  # also reachable from your phone on the same Wi-Fi (needs ?k=<token>)
     dashboard_token: str = ""  # phone access key; empty = generated once and saved in state_dir
     state_dir: Path = Path.home() / ".signalbot"
+    watchdog_url: str = ""  # optional outside watchdog (e.g. healthchecks.io) pinged every 5 min;
+    #                         it alerts you while the machine is asleep, which the bot cannot
+    offline_alert_min: int = 20  # on start-up, alert if the bot missed this many market minutes; 0 = off
 
     def watch(self, name: str) -> Watch:
         for w in self.watches:
@@ -76,7 +79,8 @@ def load(config_path: Path) -> Settings:
     if not config_path.exists():
         raise FileNotFoundError(f"{config_path} not found - copy config.example.toml to config.toml")
     raw = tomllib.loads(config_path.read_text())
-    for key in ("history_days", "fetch_news_calendar", "heartbeat_hhmm", "dashboard_port", "dashboard_lan", "dashboard_token"):
+    for key in ("history_days", "fetch_news_calendar", "heartbeat_hhmm", "dashboard_port", "dashboard_lan",
+                "dashboard_token", "watchdog_url", "offline_alert_min"):
         if key in raw:
             setattr(s, key, raw[key])
     if "state_dir" in raw:
