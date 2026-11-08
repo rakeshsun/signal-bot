@@ -66,17 +66,19 @@ def gap_since(state_dir, is_open, min_minutes: int = 20, now: float | None = Non
     if missed < min_minutes:
         return None  # it was off while the market was shut: nothing was missed
     down = int((now - seen) // 60)
-    same_day = start.date() == end.date()
-    fmt = "%-I:%M %p" if same_day else "%a %-I:%M %p"
+
+    def when(d):  # %-I is POSIX-only; Windows wants %#I, so build it from the fields instead
+        t = f"{d.hour % 12 or 12}:{d.minute:02d} {'AM' if d.hour < 12 else 'PM'}"
+        return t if start.date() == end.date() else f"{d:%a} {t}"
     span = f"{down // 60}h {down % 60}m" if down >= 60 else f"{down} min"
     title = f"Signal bot was offline for {span}"
     body = (
-        f"No alerts between {start.strftime(fmt)} and {end.strftime(fmt)} CT.\n\n"
+        f"No alerts between {when(start)} and {when(end)} CT.\n\n"
         f"The market was open for about {missed // 60}h {missed % 60}m of that, so signals in that "
         f"window never reached you. Open trades that are still live will be alerted now; "
         f"ones that opened and closed while the bot was off stay silent.\n\n"
-        f"Usual cause: the Mac went to sleep. Keep it plugged in with the lid open, or move the bot "
-        f"to a machine that stays on."
+        f"Usual cause: the machine slept. Keep it plugged in and awake, or move the bot to one "
+        f"that stays on."
     )
     return title, body
 

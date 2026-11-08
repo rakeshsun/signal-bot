@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Pluggable trading-strategy signal bot: live tastytrade candles in, phone alerts out"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["tastytrade>=13.2,<14", "certifi"]
+# tzdata: Windows has no system time-zone database, so ZoneInfo("America/Chicago") - which the
+# whole engine is built on - raises ZoneInfoNotFoundError without it. No-op on macOS and Linux.
+dependencies = ["tastytrade>=13.2,<14", "certifi", "tzdata; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

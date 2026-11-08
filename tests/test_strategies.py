@@ -311,3 +311,36 @@ def test_uptime_ping_never_raises():
 
     assert uptime.ping("") is False
     assert uptime.ping("http://127.0.0.1:9/nope", timeout=0.3) is False
+
+
+def test_no_posix_only_date_formats_anywhere():
+    """%-I and %-d are glibc extensions. On Windows they raise ValueError at render time, which
+    would take the dashboard down rather than merely look wrong, so no source file may use them."""
+    import re
+    import tokenize
+    from pathlib import Path
+
+    import signalbot
+
+    bad = []
+    for path in sorted(Path(signalbot.__file__).parent.rglob("*.py")):
+        with path.open("rb") as fh:
+            for tok in tokenize.tokenize(fh.readline):
+                if tok.type != tokenize.STRING or '"""' in tok.string:
+                    continue
+                if re.search(r"%-[a-zA-Z]", tok.string):
+                    bad.append(f"{path.name}:{tok.start[0]} {tok.string[:50]}")
+    assert not bad, "POSIX-only strftime directives (use the field arithmetic instead): " + "; ".join(bad)
+
+
+def test_clock_and_day_render_without_strftime_extensions():
+    from datetime import datetime
+
+    from signalbot.dashboard import _ampm, _mday
+
+    assert _ampm(datetime(2026, 11, 8, 15, 18)) == "3:18 PM"
+    assert _ampm(datetime(2026, 11, 8, 0, 5)) == "12:05 AM"   # midnight is 12, not 0
+    assert _ampm(datetime(2026, 11, 8, 12, 0)) == "12:00 PM"  # noon is PM
+    assert _ampm(datetime(2026, 11, 8, 9, 0)) == "9:00 AM"    # no leading zero
+    assert _mday(datetime(2026, 11, 8)) == "Nov 8"
+    assert _mday(datetime(2026, 11, 22)) == "Nov 22"

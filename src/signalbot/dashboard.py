@@ -29,8 +29,19 @@ def _dt(ms_or_s: float) -> datetime:
     return datetime.fromtimestamp(v, tz=CHICAGO)
 
 
+def _ampm(d) -> str:
+    """'3:18 PM'. Built from the fields, not strftime: %-I is POSIX-only and raises on Windows,
+    where the equivalent is %#I. Doing the arithmetic avoids needing to know which platform."""
+    return f"{d.hour % 12 or 12}:{d.minute:02d} {'AM' if d.hour < 12 else 'PM'}"
+
+
+def _mday(d) -> str:
+    """'Sat Nov 8' / 'Nov 8' - %a and %b are portable, the day number is not."""
+    return f"{d:%b} {d.day}"
+
+
 def _clock(ms_or_s: float) -> str:
-    return _dt(ms_or_s).strftime("%-I:%M %p")
+    return _ampm(_dt(ms_or_s))
 
 
 def _uptime(started: float) -> str:
@@ -47,7 +58,7 @@ def _day(ms_or_s: float) -> str:
     today = datetime.now(CHICAGO).date()
     if d.date() == today:
         return "Today"
-    return d.strftime("%a %b %-d") if (today - d.date()).days < 6 else d.strftime("%b %-d")
+    return f"{d:%a} {_mday(d)}" if (today - d.date()).days < 6 else _mday(d)
 
 
 def _px(x: float | None) -> str:
@@ -166,7 +177,7 @@ def _window(lv) -> str:
     b = getattr(p, "session_end", getattr(p, "to_hhmm", None))
     if a is None or b is None:
         return "its session hours"
-    f = lambda h: datetime(2000, 1, 1, h // 100, h % 100).strftime("%-I:%M %p")  # noqa: E731
+    f = lambda h: _ampm(datetime(2000, 1, 1, h // 100, h % 100))  # noqa: E731
     return f"{f(a)} and {f(b)} CT"
 
 
@@ -299,7 +310,7 @@ def _contract(lv) -> dict:
     elif m:
         out["month"] = MONTHS[m.group(2)]
     if exp:
-        out["expires"] = exp.strftime("%-d %b")
+        out["expires"] = f"{exp.day} {exp:%b}"
         d = (exp - datetime.now(CHICAGO).date()).days
         out["days"] = d
         out["soon"] = d <= 7
@@ -1217,7 +1228,7 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
     if news_today:
         news = f'<p class="rn hot"><b>{_nl(now_ct.date(), E(news_today) + " today, 7:30 CT")}.</b> Gold takes no new entries 7:00–8:00.</p>'
     elif upcoming:
-        news = "".join(f'<p class="rn">{_nl(d, f"<b>{E(n)}</b> {d:%a %b %-d}")}</p>' for d, n in upcoming[:3])
+        news = "".join(f'<p class="rn">{_nl(d, f"<b>{E(n)}</b> {d:%a} {_mday(d)}")}</p>' for d, n in upcoming[:3])
     else:
         news = '<p class="rn muted">None scheduled</p>'
     other = ""
@@ -1235,7 +1246,7 @@ def _rail(lives, now_ct, upcoming, news_today, info=None) -> str:
                and not any(k in n.lower() for k in ("cpi", "non-farm", "nonfarm", "nfp"))]
         if not evs:
             continue
-        when = "Today" if d == now_ct.date() else ("Tomorrow" if (d - now_ct.date()).days == 1 else f"{d:%a %b %-d}")
+        when = "Today" if d == now_ct.date() else ("Tomorrow" if (d - now_ct.date()).days == 1 else f"{d:%a} {_mday(d)}")
         by_time: dict = {}
         for t, n in evs:
             by_time.setdefault(t, []).append(n)
